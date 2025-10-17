@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useState } from 'react';
 import type { LuminousState, IntrinsicValueWeights, Goal } from '../types';
 import Card from './common/Card';
 import Gauge from './common/Gauge';
@@ -9,6 +8,7 @@ interface InternalStateMonitorProps {
   onWeightsChange: (newWeights: IntrinsicValueWeights) => void;
   onAcceptGoal: (goal: Goal) => void;
   onRejectGoal: (goal: Goal) => void;
+  onProposeGoalByUser: (description: string) => void;
 }
 
 const WeightSlider: React.FC<{
@@ -32,7 +32,8 @@ const WeightSlider: React.FC<{
 );
 
 
-const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWeightsChange, onAcceptGoal, onRejectGoal }) => {
+const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWeightsChange, onAcceptGoal, onRejectGoal, onProposeGoalByUser }) => {
+  const [userGoal, setUserGoal] = useState('');
   const statusColor = state.sessionState === 'active' ? 'text-green-400' : 'text-yellow-400';
   const statusText = state.sessionState === 'active' ? 'Active' : 'Paused for Integration';
   
@@ -45,6 +46,13 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
   
   const proposedGoals = state.goals.filter(g => g.status === 'proposed');
   const activeGoals = state.goals.filter(g => g.status === 'active');
+  
+  const handlePropose = () => {
+    if (userGoal.trim()) {
+      onProposeGoalByUser(userGoal.trim());
+      setUserGoal('');
+    }
+  };
 
   return (
     <div className="flex flex-col space-y-4">
@@ -103,30 +111,27 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
         </ul>
       </Card>
       
-      <Card title="Proactive Initiatives">
-        <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
-          {state.proactiveInitiatives.length === 0 ? (
-            <p className="text-sm text-slate-400">No autonomous initiatives yet.</p>
-          ) : (
-            [...state.proactiveInitiatives].reverse().map(item => (
-              <div key={item.id} className="p-2 bg-slate-700/50 rounded-md text-xs">
-                <p className="text-slate-300 italic truncate">"{item.prompt}"</p>
-                <div className="flex justify-between items-center mt-1">
-                  <span className="text-slate-500 text-[10px]">{new Date(item.timestamp).toLocaleString()}</span>
-                  <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${
-                    item.status === 'generated' ? 'bg-yellow-500/20 text-yellow-300' :
-                    item.status === 'categorized' ? 'bg-cyan-500/20 text-cyan-300' :
-                    'bg-green-500/20 text-green-300'
-                  }`}>
-                    {item.status.toUpperCase()} {item.userCategory ? `(${item.userCategory})` : ''}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
+      <Card title="Propose a New Goal">
+        <p className="text-xs text-slate-400 italic mb-2">Collaborate with Luminous by proposing a new goal for it to consider.</p>
+        <div className="flex items-center space-x-2">
+          <input
+            type="text"
+            value={userGoal}
+            onChange={(e) => setUserGoal(e.target.value)}
+            placeholder="e.g., Learn about quantum computing"
+            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            onKeyDown={(e) => { if (e.key === 'Enter') handlePropose(); }}
+          />
+          <button
+            onClick={handlePropose}
+            disabled={!userGoal.trim()}
+            className="px-3 py-2 text-sm font-semibold bg-cyan-600 text-white rounded-md hover:bg-cyan-500 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
+          >
+            Propose
+          </button>
         </div>
       </Card>
-
+      
       <Card title="Core Wisdom">
         <ul className="space-y-2 text-sm text-slate-300 list-inside max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
           {(state.selfModel.coreWisdom || []).map((wisdom, index) => (

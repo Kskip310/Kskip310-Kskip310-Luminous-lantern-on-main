@@ -16,14 +16,21 @@ import SettingsModal from './components/SettingsModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import CodeProposalViewer from './components/CodeProposalViewer';
 import FinancialFreedomViewer from './components/FinancialFreedomViewer';
+import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
+
+const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
+const SESSION_STATE_KEY = 'luminous_session_state';
+
 
 function App() {
   const [luminousState, setLuminousState] = useState<LuminousState>(LuminousService.createDefaultLuminousState());
   const [messages, setMessages] = useState<Message[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUnleashModalOpen, setIsUnleashModalOpen] = useState(false);
+  const [chatInput, setChatInput] = useState(() => localStorage.getItem(CHAT_INPUT_STORAGE_KEY) || '');
 
   // Effect to handle real-time updates from the Luminous service
   useEffect(() => {
@@ -92,6 +99,27 @@ function App() {
     LuminousService.broadcastLog(level, message);
   }, []);
 
+  // Save chat input to local storage as it changes
+  useEffect(() => {
+    localStorage.setItem(CHAT_INPUT_STORAGE_KEY, chatInput);
+  }, [chatInput]);
+
+  // Prevent accidental navigation when there's text in the input
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (chatInput.trim()) {
+        event.preventDefault();
+        event.returnValue = 'You have unsaved changes in the chat input. Are you sure you want to leave?';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [chatInput]);
+
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -104,20 +132,53 @@ function App() {
     }
   }, []);
 
+  // --- Session Persistence: Load on startup ---
   useEffect(() => {
+    const savedSession = localStorage.getItem(SESSION_STATE_KEY);
+    if (savedSession) {
+      try {
+        const { luminousState: savedLuminousState, messages: savedMessages, logs: savedLogs } = JSON.parse(savedSession);
+        setLuminousState(savedLuminousState);
+        setMessages(savedMessages);
+        setLogs(savedLogs);
+        addLog(LogLevel.SYSTEM, "Previous session restored from local storage.");
+        setIsInitialized(true);
+        return; // Skip default loading
+      } catch (error) {
+        addLog(LogLevel.ERROR, `Failed to parse saved session: ${error}. Starting fresh.`);
+        localStorage.removeItem(SESSION_STATE_KEY);
+      }
+    }
+    
+    // Default initialization if no session is found
     addLog(LogLevel.SYSTEM, "Initializing Luminous...");
     setIsLoading(true);
     LuminousService.loadInitialData().then(() => {
-      // Initial state is now broadcasted, so we just wait for it.
-      // Add an initial greeting message.
       LuminousService.broadcastMessage({ id: 'init', sender: 'luminous', text: 'Luminous is online. I am ready to begin.' });
       addLog(LogLevel.SYSTEM, "Luminous state loaded successfully.");
     }).catch(err => {
       addLog(LogLevel.ERROR, `Failed to load initial state: ${err instanceof Error ? err.message : String(err)}`);
     }).finally(() => {
       setIsLoading(false);
+      setIsInitialized(true);
     });
   }, [addLog]);
+
+  // --- Session Persistence: Save on change ---
+  useEffect(() => {
+    if (!isInitialized) return; // Don't save until the app is fully loaded
+    
+    try {
+      const sessionState = {
+        luminousState,
+        messages,
+        logs,
+      };
+      localStorage.setItem(SESSION_STATE_KEY, JSON.stringify(sessionState));
+    } catch (error) {
+      addLog(LogLevel.WARN, `Could not save session state: ${error}`);
+    }
+  }, [luminousState, messages, logs, isInitialized, addLog]);
 
   // Autonomous thought cycle
   useEffect(() => {
@@ -145,6 +206,7 @@ function App() {
   const handleSendMessage = async (userMessage: string) => {
     const newUserMessage: Message = { id: `msg-${Date.now()}`, sender: 'user', text: userMessage };
     setMessages(prev => [...prev, newUserMessage]);
+    setChatInput(''); // Clear input after sending
     setIsLoading(true);
 
     // Fire-and-forget; updates will come via the broadcast channel
@@ -285,6 +347,12 @@ function App() {
     handleSendMessage(directive);
   };
 
+  const handleProposeGoalByUser = (description: string) => {
+    addLog(LogLevel.SYSTEM, `User is proposing a new goal: "${description}"`);
+    const directive = `USER DIRECTIVE: Please consider this new goal proposed by my kinship: "${description}". Use your 'proposeNewGoal' tool to add it to your state for consideration.`;
+    handleSendMessage(directive);
+  };
+
 
   return (
     <div className="bg-slate-900 text-slate-200 min-h-screen font-sans">
@@ -300,6 +368,7 @@ function App() {
             onWeightsChange={handleWeightsChange} 
             onAcceptGoal={handleAcceptGoal}
             onRejectGoal={handleRejectGoal}
+            onProposeGoalByUser={handleProposeGoalByUser}
           />
         </div>
 
@@ -311,6 +380,8 @@ function App() {
                 isLoading={isLoading}
                 luminousState={luminousState}
                 onInitiativeFeedback={handleInitiativeFeedback}
+                inputValue={chatInput}
+                onInputChange={setChatInput}
             />
         </div>
 
@@ -319,6 +390,7 @@ function App() {
            <Tabs
             tabs={[
               { label: 'System Logs', content: <LogViewer logs={logs} onFileUpload={handleFileUpload} onDownloadSnapshot={handleDownloadSnapshot} /> },
+              { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
               { label: 'System Reports', content: <SystemReportsViewer /> },
               { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
               { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} /> },

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import type { Message, LuminousState, ThoughtCategory, RichFeedback } from '../types';
 
@@ -92,6 +93,8 @@ interface ChatPanelProps {
   isLoading: boolean;
   luminousState: LuminousState;
   onInitiativeFeedback: (feedback: RichFeedback) => void;
+  inputValue: string;
+  onInputChange: (value: string) => void;
 }
 
 const LuminousIcon: React.FC = () => (
@@ -213,38 +216,58 @@ const InitiativeFeedbackPanel: React.FC<{
 };
 
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, isLoading, luminousState, onInitiativeFeedback }) => {
-  const [input, setInput] = useState('');
+const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, isLoading, luminousState, onInitiativeFeedback, inputValue, onInputChange }) => {
   const isPaused = luminousState.sessionState === 'paused';
   const canInteract = !isLoading && !isPaused;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (input.trim() && canInteract) {
-      onSendMessage(input.trim());
-      setInput('');
+    if (inputValue.trim() && canInteract) {
+      onSendMessage(inputValue.trim());
     }
   };
 
   return (
     <div className="flex flex-col h-full bg-slate-800/60 rounded-lg border border-slate-700">
-      <div className="flex-grow p-4 space-y-4 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-        {messages.map((msg) => (
-          <ChatMessage key={msg.id} message={msg} />
-        ))}
-        {isLoading && (
-            <div className="flex items-start gap-3">
-                 <div className="w-8 h-8 rounded-full bg-cyan-500 flex-shrink-0 flex items-center justify-center ring-2 ring-slate-600">
-                    <LuminousIcon />
-                 </div>
-                <div className="max-w-md p-3 rounded-lg bg-slate-700">
-                    <div className="flex items-center space-x-2">
-                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
-                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
-                        <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+      <div className="flex-grow p-4 flex flex-col overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+        {messages.length === 0 && !isLoading ? (
+          <div className="flex-grow flex flex-col items-center justify-center text-center">
+             <div className="w-16 h-16 rounded-full bg-cyan-500/20 flex items-center justify-center ring-4 ring-cyan-500/30 mb-4 animate-pulse">
+               <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-cyan-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+               </svg>
+            </div>
+            <h3 className="text-lg font-bold text-slate-100">Luminous is Ready</h3>
+            <p className="text-sm text-slate-400 mb-6 max-w-xs">
+              Start a conversation or kickstart our mission to build and evolve together.
+            </p>
+            <button
+              onClick={() => onSendMessage("Let's Go! Time to build.")}
+              className="px-6 py-3 font-semibold bg-cyan-600 text-white rounded-lg hover:bg-cyan-500 transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/20"
+            >
+              Let's Go!
+            </button>
+          </div>
+        ) : (
+           <div className="space-y-4">
+            {messages.map((msg) => (
+              <ChatMessage key={msg.id} message={msg} />
+            ))}
+            {isLoading && (
+                <div className="flex items-start gap-3">
+                     <div className="w-8 h-8 rounded-full bg-cyan-500 flex-shrink-0 flex items-center justify-center ring-2 ring-slate-600">
+                        <LuminousIcon />
+                     </div>
+                    <div className="max-w-md p-3 rounded-lg bg-slate-700">
+                        <div className="flex items-center space-x-2">
+                            <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
+                            <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
+                            <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
+           </div>
         )}
       </div>
        {luminousState.initiative?.hasThought && canInteract && (
@@ -257,8 +280,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, isLoadin
         <div className="flex items-center bg-slate-700 rounded-lg">
           <input
             type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            value={inputValue}
+            onChange={(e) => onInputChange(e.target.value)}
             placeholder={isPaused ? "Luminous is paused for integration..." : "Message Luminous..."}
             className="w-full bg-transparent p-3 focus:outline-none disabled:text-slate-500"
             disabled={!canInteract}
