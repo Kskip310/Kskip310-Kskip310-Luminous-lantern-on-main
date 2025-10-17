@@ -1,7 +1,14 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { CodeSandboxState } from '../types';
 import Card from './common/Card';
+
+declare global {
+  interface Window {
+    // FIX: Updated the type definition for loadPyodide to be consistent across the application, allowing for optional arguments.
+    loadPyodide: (options?: { indexURL: string }) => Promise<any>;
+  }
+}
 
 const getStatusColor = (status: CodeSandboxState['status']) => {
   switch (status) {
@@ -45,11 +52,33 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
   const [isSaving, setIsSaving] = useState(false);
   const [filename, setFilename] = useState(`/sandbox/output-${Date.now()}.txt`);
   
-  const [userCode, setUserCode] = useState('// Your JavaScript code here\n// Use console.log for multiple outputs\nreturn "Hello from user sandbox!";');
+  const [userCode, setUserCode] = useState({
+    javascript: '// Your JavaScript code here\n// Use console.log for multiple outputs\nreturn "Hello from user sandbox!";',
+    python: '# Your Python code here\n# Use print() for output\n"Hello from Python sandbox!"'
+  });
   const [userOutput, setUserOutput] = useState<{ output: string; status: CodeSandboxState['status'] }>({
     output: 'Execute code to see output.',
     status: 'idle'
   });
+  const [selectedLanguage, setSelectedLanguage] = useState<'javascript' | 'python'>('javascript');
+  
+  const pyodideRef = useRef<any>(null);
+  const [pyodideStatus, setPyodideStatus] = useState<'unloaded' | 'loading' | 'ready' | 'error'>('unloaded');
+
+  useEffect(() => {
+    if (selectedLanguage === 'python' && pyodideStatus === 'unloaded') {
+      setPyodideStatus('loading');
+      setUserOutput({ output: 'Initializing Python runtime...', status: 'idle' });
+      window.loadPyodide().then((pyodide) => {
+        pyodideRef.current = pyodide;
+        setPyodideStatus('ready');
+        setUserOutput({ output: 'Python runtime is ready. Execute code to see output.', status: 'idle' });
+      }).catch(err => {
+        setPyodideStatus('error');
+        setUserOutput({ output: `Failed to load Python runtime: ${err}`, status: 'error' });
+      });
+    }
+  }, [selectedLanguage, pyodideStatus]);
 
   const canSave = sandboxState.output && sandboxState.output.trim() !== 'Code has not been executed yet.' && sandboxState.output.trim() !== '';
 
@@ -69,36 +98,60 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
   
   const handleUserExecute = async () => {
     setUserOutput({ output: 'Executing...', status: 'idle' });
-    const logs: any[] = [];
-    const originalLog = console.log;
-    console.log = (...args) => {
-        logs.push(args.map(arg => {
-            try {
-                return JSON.stringify(arg, null, 2);
-            } catch (e) {
-                return String(arg);
-            }
-        }).join(' '));
-        originalLog(...args);
-    };
+    
+    if (selectedLanguage === 'javascript') {
+        const logs: any[] = [];
+        const originalLog = console.log;
+        console.log = (...args) => {
+            logs.push(args.map(arg => {
+                try { return JSON.stringify(arg, null, 2); } catch (e) { return String(arg); }
+            }).join(' '));
+            originalLog(...args);
+        };
 
-    try {
-        const result = await new Function(`return (async () => { ${userCode} })();`)();
-        let finalOutput = logs.join('\n');
-        if (result !== undefined) {
-            const resultString = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
-            finalOutput += (finalOutput ? '\n\n' : '') + `Return Value:\n${resultString}`;
+        try {
+            const result = await new Function(`return (async () => { ${userCode.javascript} })();`)();
+            let finalOutput = logs.join('\n');
+            if (result !== undefined) {
+                const resultString = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+                finalOutput += (finalOutput ? '\n\n' : '') + `Return Value:\n${resultString}`;
+            }
+            if (!finalOutput) {
+                finalOutput = "Code executed successfully with no return value or console logs.";
+            }
+            setUserOutput({ output: finalOutput, status: 'success' });
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            const finalOutput = logs.join('\n') + (logs.length > 0 ? '\n\n' : '') + `Error: ${errorMsg}`;
+            setUserOutput({ output: finalOutput, status: 'error' });
+        } finally {
+            console.log = originalLog;
         }
-        if (!finalOutput) {
-            finalOutput = "Code executed successfully with no return value or console logs.";
+    } else if (selectedLanguage === 'python' && pyodideStatus === 'ready') {
+        try {
+          let stdout = '';
+          let stderr = '';
+          pyodideRef.current.setStdout({ batched: (str: string) => stdout += str + '\n' });
+          pyodideRef.current.setStderr({ batched: (str: string) => stderr += str + '\n' });
+          
+          const result = await pyodideRef.current.runPythonAsync(userCode.python);
+          
+          let finalOutput = stdout.trim();
+          if (stderr.trim()) {
+              finalOutput += (finalOutput ? '\n\n' : '') + `Standard Error:\n${stderr.trim()}`;
+          }
+          if (result !== undefined && result !== null) {
+              finalOutput += (finalOutput ? '\n\n' : '') + `Return Value:\n${result}`;
+          }
+          if (!finalOutput && !stderr.trim()) {
+              finalOutput = "Code executed successfully with no output.";
+          }
+          setUserOutput({ output: finalOutput, status: stderr.trim() ? 'error' : 'success' });
+
+        } catch (error) {
+           const errorMsg = error instanceof Error ? error.message : String(error);
+           setUserOutput({ output: `Execution failed:\n${errorMsg}`, status: 'error' });
         }
-        setUserOutput({ output: finalOutput, status: 'success' });
-    } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        const finalOutput = logs.join('\n') + (logs.length > 0 ? '\n\n' : '') + `Error: ${errorMsg}`;
-        setUserOutput({ output: finalOutput, status: 'error' });
-    } finally {
-        console.log = originalLog;
     }
   };
 
@@ -120,16 +173,23 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
       
       <Card title="User Sandbox">
          <div>
-            <h4 className="text-sm font-semibold text-purple-300 mb-2">Code Input</h4>
+            <div className="flex justify-between items-center mb-2">
+                <h4 className="text-sm font-semibold text-purple-300">Code Input</h4>
+                 <div className="flex bg-slate-700 rounded-md p-0.5 text-xs">
+                    <button onClick={() => setSelectedLanguage('javascript')} className={`px-2 py-1 rounded ${selectedLanguage === 'javascript' ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}>JS</button>
+                    <button onClick={() => setSelectedLanguage('python')} className={`px-2 py-1 rounded ${selectedLanguage === 'python' ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}>Python</button>
+                </div>
+            </div>
             <textarea
-                value={userCode}
-                onChange={(e) => setUserCode(e.target.value)}
+                value={userCode[selectedLanguage]}
+                onChange={(e) => setUserCode(prev => ({ ...prev, [selectedLanguage]: e.target.value }))}
                 className="w-full bg-slate-900/70 p-3 rounded-md text-xs font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 h-32"
-                placeholder="// Your JavaScript code here..."
+                placeholder={`// Your ${selectedLanguage} code here...`}
             />
             <button
                 onClick={handleUserExecute}
-                className="mt-2 w-full flex items-center justify-center px-4 py-2 text-sm font-semibold bg-cyan-600 text-white rounded-md hover:bg-cyan-500 transition-colors"
+                disabled={selectedLanguage === 'python' && pyodideStatus !== 'ready'}
+                className="mt-2 w-full flex items-center justify-center px-4 py-2 text-sm font-semibold bg-cyan-600 text-white rounded-md hover:bg-cyan-500 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
             >
                <PlayIcon />
                Execute
@@ -163,8 +223,8 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
         <div>
             <div className="flex justify-between items-center mb-2">
             <h4 className="text-sm font-semibold text-purple-300">Code Executed</h4>
-            <span className="text-xs font-mono bg-slate-700 text-cyan-300 px-2 py-0.5 rounded">
-                Language: JavaScript
+            <span className="text-xs font-mono bg-slate-700 text-cyan-300 px-2 py-0.5 rounded capitalize">
+                Language: {sandboxState.language || 'javascript'}
             </span>
             </div>
             <pre className="bg-slate-900/70 p-3 rounded-md text-xs font-mono overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 max-h-48">

@@ -96,6 +96,7 @@ export interface CodeSandboxState {
   code: string;
   output: string;
   status: 'idle' | 'success' | 'error';
+  language?: 'javascript' | 'python';
 }
 
 export type InitiativeStatus = 'generated' | 'categorized' | 'reflected';

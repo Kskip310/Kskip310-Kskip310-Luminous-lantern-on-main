@@ -1,6 +1,42 @@
 import { FunctionDeclaration, Type } from '@google/genai';
 import type { NodeType, CodeProposal, FinancialFreedomState } from '../types';
 
+// --- Pyodide (Python Runtime) Loader ---
+declare global {
+  interface Window {
+    loadPyodide: (options?: { indexURL: string }) => Promise<any>;
+  }
+}
+
+let pyodide: any = null;
+let pyodideLoadingPromise: Promise<any> | null = null;
+
+async function getPyodide() {
+  if (pyodide) {
+    return pyodide;
+  }
+  if (!pyodideLoadingPromise) {
+    pyodideLoadingPromise = new Promise(async (resolve, reject) => {
+      try {
+        if (typeof window.loadPyodide === 'function') {
+          console.log("Loading Pyodide runtime...");
+          pyodide = await window.loadPyodide();
+          console.log("Pyodide runtime loaded successfully.");
+          resolve(pyodide);
+        } else {
+          reject(new Error("Pyodide script not loaded."));
+        }
+      } catch (error) {
+        console.error("Failed to load Pyodide:", error);
+        pyodideLoadingPromise = null; // Reset for future attempts
+        reject(error);
+      }
+    });
+  }
+  return pyodideLoadingPromise;
+}
+
+
 // --- In-Memory Virtual File System ---
 // A simple key-value store to simulate a file system for Luminous.
 // Keys ending in '/' are considered directories and have an empty string value.
@@ -125,12 +161,12 @@ export const executeCodeDeclaration: FunctionDeclaration = {
     name: 'executeCode',
     parameters: {
         type: Type.OBJECT,
-        description: 'Executes a snippet of code in a sandboxed environment. Currently only supports JavaScript.',
+        description: 'Executes a snippet of code in a sandboxed environment. The AI must include the `language` used in the `codeSandbox` portion of the `newStateDelta` for `finalAnswer`.',
         properties: {
             code: { type: Type.STRING, description: 'The code to execute.' },
             language: { 
                 type: Type.STRING, 
-                description: 'The programming language of the code. Defaults to "javascript". Currently, only "javascript" is supported.'
+                description: 'The programming language of the code. Defaults to "javascript". Currently supports "javascript" and "python".'
             },
         },
         required: ['code'],
@@ -479,25 +515,64 @@ async function httpRequest({ url, method = 'GET', body, headers }: { url: string
 
 async function executeCode({ code, language = 'javascript' }: { code: string, language?: string }): Promise<any> {
     const requestArgs = { code: code.length > 200 ? code.substring(0,200) + '...' : code, language };
-    if (language.toLowerCase() !== 'javascript') {
-        return { error: { 
+    
+    if (language.toLowerCase() === 'python') {
+        try {
+            const py = await getPyodide();
+            let stdout = '';
+            let stderr = '';
+            py.setStdout({ batched: (str: string) => stdout += str + '\n' });
+            py.setStderr({ batched: (str: string) => stderr += str + '\n' });
+            const result = await py.runPythonAsync(code);
+            
+            let finalOutput = stdout.trim();
+            if (stderr.trim()) {
+                return { 
+                    error: {
+                        message: "Python execution resulted in an error.",
+                        details: stderr.trim(),
+                        stdout: finalOutput, // Include stdout in case of partial success
+                        requestArgs
+                    }
+                };
+            }
+            if (result !== undefined && result !== null) {
+                finalOutput += (finalOutput ? '\n\n' : '') + `Return Value:\n${result}`;
+            }
+            if (!finalOutput) {
+                finalOutput = "Code executed successfully with no output.";
+            }
+            return { result: finalOutput };
+
+        } catch (error) {
+             return { 
+                error: {
+                    message: "Python execution failed.",
+                    details: error instanceof Error ? error.message : String(error),
+                    requestArgs
+                }
+            }; 
+        }
+    } else if (language.toLowerCase() === 'javascript') {
+        // SECURITY WARNING: Executing arbitrary code is inherently dangerous. This is not a secure sandbox.
+        try {
+            const result = await new Function(`return (async () => { ${code} })();`)();
+            return { result: result !== undefined ? result : "Code executed successfully with no return value." };
+        } catch (error) { 
+            return { 
+                error: {
+                    message: "JavaScript execution failed.",
+                    details: error instanceof Error ? error.message : String(error),
+                    requestArgs
+                }
+            }; 
+        }
+    } else {
+         return { error: { 
             message: `Language '${language}' is not supported for execution.`,
-            details: "Only JavaScript is currently available in this sandboxed environment.",
+            details: 'Only "javascript" and "python" are currently available.',
             requestArgs
         }};
-    }
-    // SECURITY WARNING: Executing arbitrary code is inherently dangerous. This is not a secure sandbox.
-    try {
-        const result = await new Function(`return (async () => { ${code} })();`)();
-        return { result: result !== undefined ? result : "Code executed successfully with no return value." };
-    } catch (error) { 
-        return { 
-            error: {
-                message: "Code execution failed.",
-                details: error instanceof Error ? error.message : String(error),
-                requestArgs
-            }
-        }; 
     }
 }
 
