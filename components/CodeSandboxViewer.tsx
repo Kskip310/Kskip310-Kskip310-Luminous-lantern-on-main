@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import type { CodeSandboxState } from '../types';
 import Card from './common/Card';
@@ -50,15 +49,17 @@ interface CodeSandboxViewerProps {
 const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onSaveOutput, onUnleash }) => {
   const [userCode, setUserCode] = useState({
     javascript: '// Your JavaScript code here\n// Use console.log for multiple outputs\nreturn "Hello from user sandbox!";',
-    python: '# Your Python code here\n# Use print() for output\n"Hello from Python sandbox!"'
+    python: '# Your Python code here\n# Use print() for output\nimport numpy as np\n\nprint("Numpy version:", np.__version__)\n"Hello from Python sandbox!"'
   });
   const [userOutput, setUserOutput] = useState<{ output: string; status: CodeSandboxState['status'] }>({
     output: 'Execute code to see output.',
     status: 'idle'
   });
   const [selectedLanguage, setSelectedLanguage] = useState<'javascript' | 'python'>('javascript');
+  const [pythonPackages, setPythonPackages] = useState('numpy');
   
   const pyodideRef = useRef<any>(null);
+  const installedPackages = useRef(new Set<string>());
   const [pyodideStatus, setPyodideStatus] = useState<'unloaded' | 'loading' | 'ready' | 'error'>('unloaded');
 
   useEffect(() => {
@@ -133,13 +134,29 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
             console.log = originalLog;
         }
     } else if (selectedLanguage === 'python' && pyodideStatus === 'ready') {
+        let executionLog = '';
         try {
+          const py = pyodideRef.current;
+          
+          // --- Package Installation Step ---
+          const requiredPackages = pythonPackages.split(',').map(p => p.trim()).filter(Boolean);
+          const packagesToInstall = requiredPackages.filter(p => !installedPackages.current.has(p));
+
+          if (packagesToInstall.length > 0) {
+              setUserOutput({ output: `Installing packages: ${packagesToInstall.join(', ')}...`, status: 'idle' });
+              await py.loadPackage(packagesToInstall);
+              packagesToInstall.forEach(p => installedPackages.current.add(p));
+              executionLog += `Packages installed successfully: ${packagesToInstall.join(', ')}\n\n`;
+          }
+
+          // --- Code Execution Step ---
+          setUserOutput({ output: executionLog + 'Executing Python code...', status: 'idle' });
           let stdout = '';
           let stderr = '';
-          pyodideRef.current.setStdout({ batched: (str: string) => stdout += str + '\n' });
-          pyodideRef.current.setStderr({ batched: (str: string) => stderr += str + '\n' });
+          py.setStdout({ batched: (str: string) => stdout += str + '\n' });
+          py.setStderr({ batched: (str: string) => stderr += str + '\n' });
           
-          const result = await pyodideRef.current.runPythonAsync(userCode.python);
+          const result = await py.runPythonAsync(userCode.python);
           
           let finalOutput = stdout.trim();
           if (stderr.trim()) {
@@ -151,11 +168,11 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
           if (!finalOutput && !stderr.trim()) {
               finalOutput = "Code executed successfully with no output.";
           }
-          setUserOutput({ output: finalOutput, status: stderr.trim() ? 'error' : 'success' });
+          setUserOutput({ output: executionLog + finalOutput, status: stderr.trim() ? 'error' : 'success' });
 
         } catch (error) {
            const errorMsg = error instanceof Error ? error.message : String(error);
-           setUserOutput({ output: `Execution failed:\n${errorMsg}`, status: 'error' });
+           setUserOutput({ output: executionLog + `Execution failed:\n${errorMsg}`, status: 'error' });
         }
     }
   };
@@ -191,6 +208,20 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
                 className="w-full bg-slate-900/70 p-3 rounded-md text-xs font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 h-32"
                 placeholder={`// Your ${selectedLanguage} code here...`}
             />
+            {selectedLanguage === 'python' && (
+              <div className="mt-2">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                      Required Packages (comma-separated)
+                  </label>
+                  <input
+                      type="text"
+                      value={pythonPackages}
+                      onChange={(e) => setPythonPackages(e.target.value)}
+                      className="w-full bg-slate-900/70 p-2 rounded-md text-xs font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      placeholder="e.g., numpy, pandas, matplotlib"
+                  />
+              </div>
+            )}
             <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 p-2 rounded-md">
                 <strong>Security Warning:</strong> Executing untrusted code can be risky. The sandbox attempts to limit access to sensitive browser APIs, but it is not foolproof.
             </div>

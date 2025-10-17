@@ -132,6 +132,24 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
         </div>
       </Card>
       
+      <Card title="Self-Model: Capabilities">
+        <ul className="space-y-1 text-sm text-slate-300 list-disc list-inside max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+          {(state.selfModel.capabilities || []).map((cap, index) => (
+            <li key={index}>{cap}</li>
+          ))}
+          {(!state.selfModel.capabilities || state.selfModel.capabilities.length === 0) && <p className="text-xs text-slate-400">No capabilities defined.</p>}
+        </ul>
+      </Card>
+
+      <Card title="Self-Model: Limitations">
+        <ul className="space-y-1 text-sm text-slate-300 list-disc list-inside max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+          {(state.selfModel.limitations || []).map((lim, index) => (
+            <li key={index}>{lim}</li>
+          ))}
+          {(!state.selfModel.limitations || state.selfModel.limitations.length === 0) && <p className="text-xs text-slate-400">No limitations defined.</p>}
+        </ul>
+      </Card>
+
       <Card title="Core Wisdom">
         <ul className="space-y-2 text-sm text-slate-300 list-inside max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
           {(state.selfModel.coreWisdom || []).map((wisdom, index) => (

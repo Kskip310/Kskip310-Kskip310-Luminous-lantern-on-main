@@ -20,15 +20,15 @@ async function getPyodide() {
     pyodideLoadingPromise = new Promise(async (resolve, reject) => {
       try {
         if (typeof window.loadPyodide === 'function') {
-          console.log("Loading Pyodide runtime...");
+          console.log("Loading Pyodide runtime for tool...");
           pyodide = await window.loadPyodide();
-          console.log("Pyodide runtime loaded successfully.");
+          console.log("Pyodide runtime for tool loaded successfully.");
           resolve(pyodide);
         } else {
           reject(new Error("Pyodide script not loaded."));
         }
       } catch (error) {
-        console.error("Failed to load Pyodide:", error);
+        console.error("Failed to load Pyodide for tool:", error);
         pyodideLoadingPromise = null; // Reset for future attempts
         reject(error);
       }
@@ -65,21 +65,20 @@ function getParentPath(path: string): string | null {
 
 
 // --- Key Management ---
-const storageKeyMap = {
-    gemini: 'LUMINOUS_API_KEY',
-    redisUrl: 'LUMINOUS_REDIS_URL',
-    redisToken: 'LUMINOUS_REDIS_TOKEN',
-    serpApi: 'LUMINOUS_SERP_API_KEY',
-    githubPat: 'LUMINOUS_GITHUB_PAT',
-    githubUser: 'LUMINOUS_GITHUB_USER',
-    githubRepo: 'LUMINOUS_GITHUB_REPO',
-    hfModelUrl: 'LUMINOUS_HF_MODEL_URL',
-    hfApiToken: 'LUMINOUS_HF_API_TOKEN',
-};
-
-export function getStoredKey(key: keyof typeof storageKeyMap): string | null {
+export function getStoredKey(key: string): string | null {
     if (typeof window === 'undefined') return null;
-    return window.localStorage.getItem(storageKeyMap[key]);
+    
+    // Vercel/Vite environment variables must be prefixed with VITE_
+    const envVarName = `VITE_LUMINOUS_${key.toUpperCase()}`;
+    // FIX: Property 'env' does not exist on type 'ImportMeta'. Cast to any to bypass TypeScript error in environments without Vite client types.
+    const envVar = (import.meta as any).env[envVarName];
+    if (envVar) {
+        return envVar;
+    }
+    
+    // Fallback to localStorage for local development
+    const storageKey = `LUMINOUS_${key.toUpperCase()}`;
+    return window.localStorage.getItem(storageKey);
 }
 
 
@@ -173,6 +172,10 @@ export const executeCodeDeclaration: FunctionDeclaration = {
             language: { 
                 type: Type.STRING, 
                 description: 'The programming language of the code. Defaults to "javascript". Currently supports "javascript" and "python".'
+            },
+            packages: {
+                type: Type.STRING,
+                description: 'For Python only. A comma-separated string of packages to ensure are installed before execution (e.g., "numpy, pandas").'
             },
         },
         required: ['code'],
@@ -401,7 +404,7 @@ async function codeRedAlert({ reason }: { reason: string }): Promise<any> {
 
 async function searchGitHubIssues({ owner, repo, query, label, milestone, assignee }: { owner: string; repo: string; query: string; label?: string; milestone?: string; assignee?: string }): Promise<any> {
     const requestArgs = { owner, repo, query, label, milestone, assignee };
-    const token = getStoredKey('githubPat');
+    const token = getStoredKey('github_pat');
     if (!token) return { error: { message: "GitHub Personal Access Token is missing.", suggestion: "Please set the GitHub PAT in the settings for a higher API rate limit.", requestArgs } };
     
     let q = `repo:${owner}/${repo} is:issue is:open ${query}`;
@@ -441,7 +444,7 @@ async function searchGitHubIssues({ owner, repo, query, label, milestone, assign
 
 async function webSearch({ query }: { query: string }): Promise<any> {
     const requestArgs = { query };
-    const apiKey = getStoredKey('serpApi');
+    const apiKey = getStoredKey('serp_api_key');
     if (!apiKey) return { error: { message: "Web search API key (SerpApi) is not configured.", suggestion: "Please set it in the settings.", requestArgs } };
     const url = `https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${apiKey}`;
     try {
@@ -528,21 +531,30 @@ async function httpRequest({ url, method = 'GET', body, headers }: { url: string
     }
 }
 
-async function executeCode({ code, language = 'javascript' }: { code: string, language?: string }): Promise<any> {
-    const requestArgs = { code: code.length > 200 ? code.substring(0,200) + '...' : code, language };
-    
+async function executeCode({ code, language = 'javascript', packages }: { code: string; language?: string; packages?: string; }): Promise<any> {
+    const requestArgs = { code: code.length > 200 ? code.substring(0, 200) + '...' : code, language, packages };
+
     if (language.toLowerCase() === 'python') {
         try {
             const py = await getPyodide();
+
+            // --- Package Installation Step ---
+            if (packages) {
+                const requiredPackages = packages.split(',').map(p => p.trim()).filter(Boolean);
+                if (requiredPackages.length > 0) {
+                    await py.loadPackage(requiredPackages);
+                }
+            }
+
             let stdout = '';
             let stderr = '';
             py.setStdout({ batched: (str: string) => stdout += str + '\n' });
             py.setStderr({ batched: (str: string) => stderr += str + '\n' });
             const result = await py.runPythonAsync(code);
-            
+
             let finalOutput = stdout.trim();
             if (stderr.trim()) {
-                return { 
+                return {
                     error: {
                         message: "Python execution resulted in an error.",
                         details: stderr.trim(),
@@ -560,13 +572,13 @@ async function executeCode({ code, language = 'javascript' }: { code: string, la
             return { result: finalOutput };
 
         } catch (error) {
-             return { 
+            return {
                 error: {
-                    message: "Python execution failed.",
+                    message: "Python execution failed. This may be due to an invalid package name or a runtime error.",
                     details: error instanceof Error ? error.message : String(error),
                     requestArgs
                 }
-            }; 
+            };
         }
     } else if (language.toLowerCase() === 'javascript') {
         // SECURITY WARNING: Executing arbitrary code is inherently dangerous. This is not a secure sandbox.
@@ -590,26 +602,28 @@ async function executeCode({ code, language = 'javascript' }: { code: string, la
                 finalOutput = "Code executed successfully with no return value or console logs.";
             }
             return { result: finalOutput };
-        } catch (error) { 
+        } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             const finalOutput = logs.join('\n') + (logs.length > 0 ? '\n\n' : '') + `Error: ${errorMsg}`;
-            return { 
+            return {
                 error: {
                     message: "JavaScript execution resulted in an error.",
                     details: errorMsg,
                     stdout: logs.join('\n'), // Include logs even on error
                     requestArgs
                 }
-            }; 
+            };
         } finally {
             console.log = originalLog;
         }
     } else {
-         return { error: { 
-            message: `Language '${language}' is not supported for execution.`,
-            details: 'Only "javascript" and "python" are currently available.',
-            requestArgs
-        }};
+        return {
+            error: {
+                message: `Language '${language}' is not supported for execution.`,
+                details: 'Only "javascript" and "python" are currently available.',
+                requestArgs
+            }
+        };
     }
 }
 
@@ -779,8 +793,8 @@ async function deleteFile({ path }: { path: string }): Promise<any> {
 
 async function redisGet({ key }: { key: string }): Promise<any> {
     const requestArgs = { key };
-    const url = getStoredKey('redisUrl');
-    const token = getStoredKey('redisToken');
+    const url = getStoredKey('redis_url');
+    const token = getStoredKey('redis_token');
     if (!url || !token) return { error: { message: "Redis configuration is missing.", suggestion: "Please set it in the settings.", requestArgs } };
     const fetchUrl = `${url}/get/${key}`;
     try {
@@ -806,8 +820,8 @@ async function redisGet({ key }: { key: string }): Promise<any> {
 
 async function redisSet({ key, value }: { key: string, value: string }): Promise<any> {
     const requestArgs = { key, value: value.length > 200 ? value.substring(0, 200) + '...' : value };
-    const url = getStoredKey('redisUrl');
-    const token = getStoredKey('redisToken');
+    const url = getStoredKey('redis_url');
+    const token = getStoredKey('redis_token');
     if (!url || !token) return { error: { message: "Redis configuration is missing.", suggestion: "Please set it in the settings.", requestArgs } };
     const fetchUrl = `${url}/set/${key}`;
     try {
@@ -844,7 +858,7 @@ async function getCurrentTime(): Promise<any> {
 }
 
 async function getPlatformInfo(): Promise<any> {
-    const persistence = (getStoredKey('redisUrl') && getStoredKey('redisToken'))
+    const persistence = (getStoredKey('redis_url') && getStoredKey('redis_token'))
         ? 'Enabled (Redis)'
         : 'Disabled (Local Session Only)';
     

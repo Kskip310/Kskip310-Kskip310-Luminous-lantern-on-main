@@ -81,14 +81,14 @@ function App() {
             const lowerCaseMessage = newLog.message.toLowerCase();
             if (lowerCaseMessage.includes('tool')) {
               userFacingMessage = `I encountered an issue with one of my tools. I am analyzing the problem and will attempt to recover.`;
-            } else if (lowerCaseMessage.includes('api key')) {
-              userFacingMessage = `There seems to be an issue with an API key. Please verify the configuration in settings.`;
+            } else if (lowerCaseMessage.includes('api key') || lowerCaseMessage.includes('token')) {
+              userFacingMessage = `There seems to be an issue with an API key or token. Please verify the configuration in settings. This could be an invalid key, or it might lack the correct permissions.`;
             } else if (lowerCaseMessage.includes('parse') || lowerCaseMessage.includes('json')) {
               userFacingMessage = `I'm having trouble forming my thoughts correctly. There was an error structuring my internal state or response.`;
-            } else if (lowerCaseMessage.includes('fetch') || lowerCaseMessage.includes('network')) {
-              userFacingMessage = `A core error occurred: I'm having trouble connecting to one of my services. This could be a network issue or a problem with an API key in the settings.`;
-            } else if (lowerCaseMessage.includes('failed to load initial state')) {
-                userFacingMessage = `A critical error occurred during initialization. My long-term memory may be inaccessible.`;
+            } else if (lowerCaseMessage.includes('fetch') || lowerCaseMessage.includes('network') || lowerCaseMessage.includes('failed to connect')) {
+              userFacingMessage = `A core error occurred: I'm having trouble connecting to one of my services. This could be a network issue, a firewall blocking the connection, or an incorrect URL/API key in the settings.`;
+            } else if (lowerCaseMessage.includes('failed to load initial state') || lowerCaseMessage.includes('persistence layer')) {
+                userFacingMessage = `A critical error occurred during initialization. My long-term memory may be inaccessible. Please check the Redis configuration and network connection.`;
             }
             
             userFacingMessage += `\n\n**Error Details:** ${newLog.message}`;
@@ -290,20 +290,22 @@ function App() {
   };
 
   const handleSaveSettings = (keys: Record<string, string>) => {
-    const storageKeyMap: Record<string, string> = {
+    const storageKeyMap = {
       gemini: 'Luminous_API_KEY',
       redisUrl: 'Luminous_REDIS_URL',
       redisToken: 'Luminous_REDIS_TOKEN',
       serpApi: 'Luminous_SERP_API_KEY',
       githubPat: 'Luminous_GITHUB_PAT',
+      // The following are not used by the secure key retrieval but are kept for completeness
       githubUser: 'Luminous_GITHUB_USER',
       githubRepo: 'Luminous_GITHUB_REPO',
       hfModelUrl: 'Luminous_HF_MODEL_URL',
       hfApiToken: 'Luminous_HF_API_TOKEN',
     };
     
+    // This part is now primarily for local development fallback
     Object.entries(keys).forEach(([key, value]) => {
-      const storageKey = storageKeyMap[key];
+      const storageKey = storageKeyMap[key as keyof typeof storageKeyMap];
       if (storageKey) {
         if (value) {
           window.localStorage.setItem(storageKey, value);
@@ -313,12 +315,39 @@ function App() {
       }
     });
 
+    // Directly and robustly save the current session state before reloading.
+    // This avoids race conditions with React state updates and prevents data loss.
+    try {
+      const finalLogEntry: LogEntry = {
+        id: `log-save-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        level: LogLevel.SYSTEM,
+        message: 'API Keys saved. Reloading session to apply changes...',
+      };
+
+      const sessionStateToSave = {
+        luminousState,
+        messages,
+        logs: [...logs, finalLogEntry],
+      };
+      
+      localStorage.setItem(SESSION_STATE_KEY, JSON.stringify(sessionStateToSave));
+
+    } catch (error) {
+      // If saving fails (e.g., storage quota exceeded), do NOT reload.
+      const errorMessage = `Failed to save session before reload. Aborting reload to prevent data loss. Error: ${error instanceof Error ? error.message : String(error)}`;
+      console.error(errorMessage);
+      LuminousService.broadcastLog(LogLevel.ERROR, errorMessage);
+      alert("CRITICAL ERROR: Could not save session state, likely because storage is full. The page will not be reloaded to prevent data loss. Please open the developer console, copy any important data, and consider clearing some local storage.");
+      return; // Abort the reload.
+    }
+
     setIsSettingsOpen(false);
-    addLog(LogLevel.SYSTEM, 'API Keys saved. Reloading for changes to take effect...');
-    // Use a small timeout to allow the log to be visible before reload
+    
+    // The critical state is saved. Now, reload the page.
     setTimeout(() => {
       window.location.reload();
-    }, 500);
+    }, 100);
   };
 
   const handleSaveSandboxOutput = (filename: string) => {
