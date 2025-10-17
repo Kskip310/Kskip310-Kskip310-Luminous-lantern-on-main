@@ -292,7 +292,7 @@ function App() {
         onOverride={() => addLog(LogLevel.SYSTEM, 'Override signal sent.')} 
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
-      <main className="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 max-w-screen-2xl mx-auto">
+      <main className="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4">
         {/* Left Panel */}
         <div className="lg:col-span-3 h-[calc(100vh-100px)] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
           <InternalStateMonitor 
