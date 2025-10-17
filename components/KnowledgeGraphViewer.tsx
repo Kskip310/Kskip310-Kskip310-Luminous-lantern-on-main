@@ -94,22 +94,10 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
     return () => resizeObserver.disconnect();
   }, []);
 
-  const handleNodeClick = useCallback((event: React.MouseEvent, nodeId: string) => {
-    event.stopPropagation();
-    setSelectedNodeId(prevId => (prevId === nodeId ? null : nodeId));
+  const resetView = useCallback(() => {
+    setSelectedNodeId(null);
+    setTransform({ k: 1, x: 0, y: 0 });
   }, []);
-
-  const handleNodeDoubleClick = useCallback((event: React.MouseEvent, d: D3Node) => {
-    event.stopPropagation();
-    const { width, height } = dimensions;
-    if (!width || !height || typeof d.x !== 'number' || typeof d.y !== 'number') return;
-    
-    const scale = 1.5;
-    const x = width / 2 - scale * d.x;
-    const y = height / 2 - scale * d.y;
-    
-    setTransform({ k: scale, x, y });
-  }, [dimensions]);
 
   // Main D3 setup and simulation effect
   useEffect(() => {
@@ -192,6 +180,18 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
     nodeSelectionRef.current
         .on('mouseenter', (event, d) => setHoveredNode(d))
         .on('mouseleave', () => setHoveredNode(null))
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            setSelectedNodeId(prevId => (prevId === d.id ? null : d.id));
+        })
+        .on('dblclick', (event, d) => {
+            event.stopPropagation();
+            if (typeof d.x !== 'number' || typeof d.y !== 'number') return;
+            const scale = 1.5;
+            const x = width / 2 - scale * d.x;
+            const y = height / 2 - scale * d.y;
+            setTransform({ k: scale, x, y });
+        })
         .call(drag as any);
 
     simulation.alpha(1).restart();
@@ -229,11 +229,6 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
     }
   }, [selectedNodeId, highlightedNodeIds, highlightedEdgeIds, transform.k]);
   
-  const resetZoom = () => {
-    setSelectedNodeId(null);
-    setTransform({ k: 1, x: 0, y: 0 });
-  };
-  
   const renderTooltip = () => {
     if (!hoveredNode || typeof hoveredNode.x !== 'number' || typeof hoveredNode.y !== 'number') return null;
     const counts = edgeCounts.get(hoveredNode.id);
@@ -262,25 +257,6 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
     );
   };
 
-  const handleSvgClick = (e: React.MouseEvent) => {
-      const target = e.target as SVGElement;
-      const nodeGroup = target.closest('.node-group');
-      if (nodeGroup && (nodeGroup as any).__data__) {
-          const d = (nodeGroup as any).__data__ as D3Node;
-          handleNodeClick(e, d.id);
-      }
-  };
-  const handleSvgDoubleClick = (e: React.MouseEvent) => {
-      const target = e.target as SVGElement;
-      const nodeGroup = target.closest('.node-group');
-      if (nodeGroup && (nodeGroup as any).__data__) {
-          const d = (nodeGroup as any).__data__ as D3Node;
-          handleNodeDoubleClick(e, d);
-      } else {
-          resetZoom();
-      }
-  };
-
   return (
     <div className="h-full flex flex-col">
       <style>{styles}</style>
@@ -288,7 +264,12 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
         ref={containerRef} 
         className="relative w-full flex-grow overflow-hidden kg-container rounded-b-lg"
       >
-        <svg ref={svgRef} className="w-full h-full" onClick={handleSvgClick} onDoubleClick={handleSvgDoubleClick}>
+        <svg 
+            ref={svgRef} 
+            className="w-full h-full" 
+            onClick={() => setSelectedNodeId(null)}
+            onDoubleClick={resetView}
+        >
             <defs>
                  <marker id="arrowhead" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151" />

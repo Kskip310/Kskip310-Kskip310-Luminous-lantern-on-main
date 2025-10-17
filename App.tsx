@@ -21,6 +21,26 @@ import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer'
 const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
 const SESSION_STATE_KEY = 'luminous_session_state';
 
+// Utility function for deep merging state updates
+const isObject = (obj: any): obj is object => obj && typeof obj === 'object' && !Array.isArray(obj);
+
+function deepMerge<T extends object>(target: T, source: Partial<T>): T {
+  const output = { ...target };
+  if (isObject(target) && isObject(source)) {
+    Object.keys(source).forEach((key) => {
+      const sourceKey = key as keyof T;
+      if (isObject(source[sourceKey]) && sourceKey in target && isObject(target[sourceKey])) {
+        // Recursively merge objects
+        output[sourceKey] = deepMerge(target[sourceKey] as object, source[sourceKey] as object) as T[keyof T];
+      } else {
+        // Otherwise, overwrite (handles primitives, arrays, and new keys)
+        (output as any)[sourceKey] = source[sourceKey];
+      }
+    });
+  }
+  return output;
+}
+
 
 function App() {
   const [luminousState, setLuminousState] = useState<LuminousState>(LuminousService.createDefaultLuminousState());
@@ -46,7 +66,7 @@ function App() {
             LuminousService.broadcastLog(LogLevel.WARN, "Received a malformed 'codeProposals' update from the model. Ignoring the update to prevent a crash.");
             delete newPayload.codeProposals;
           }
-          setLuminousState(prevState => ({ ...prevState, ...newPayload }));
+          setLuminousState(prevState => deepMerge(prevState, newPayload));
           break;
         case 'full_state_replace':
           setLuminousState(payload as LuminousState);
