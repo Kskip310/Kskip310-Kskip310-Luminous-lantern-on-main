@@ -17,9 +17,11 @@ import ConfirmationModal from './components/ConfirmationModal';
 import CodeProposalViewer from './components/CodeProposalViewer';
 import FinancialFreedomViewer from './components/FinancialFreedomViewer';
 import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
+import WelcomeModal from './components/WelcomeModal';
 
 const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
 const SESSION_STATE_KEY = 'luminous_session_state';
+const USER_NAME_KEY = 'luminous_user_name';
 
 // Utility function for deep merging state updates
 const isObject = (obj: any): obj is object => obj && typeof obj === 'object' && !Array.isArray(obj);
@@ -51,6 +53,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUnleashModalOpen, setIsUnleashModalOpen] = useState(false);
   const [chatInput, setChatInput] = useState(() => localStorage.getItem(CHAT_INPUT_STORAGE_KEY) || '');
+  const [userName, setUserName] = useState<string | null>(null);
 
   // Effect to handle real-time updates from the Luminous service
   useEffect(() => {
@@ -154,6 +157,11 @@ function App() {
 
   // --- Session Persistence: Load on startup ---
   useEffect(() => {
+    const savedName = localStorage.getItem(USER_NAME_KEY);
+    if (savedName) {
+        setUserName(savedName);
+    }
+      
     const savedSession = localStorage.getItem(SESSION_STATE_KEY);
     if (savedSession) {
       try {
@@ -204,26 +212,27 @@ function App() {
   useEffect(() => {
     const autonomousInterval = setInterval(() => {
       // Do not run if a user interaction is happening or session is paused.
-      if (!isLoading && luminousState.sessionState === 'active') {
-        LuminousService.runAutonomousCycle(luminousState);
+      if (!isLoading && luminousState.sessionState === 'active' && userName) {
+        LuminousService.runAutonomousCycle(luminousState, userName);
       }
     }, 30000); // Run every 30 seconds
 
     return () => clearInterval(autonomousInterval);
-  }, [isLoading, luminousState]);
+  }, [isLoading, luminousState, userName]);
 
   // Wisdom distillation cycle (runs less frequently)
   useEffect(() => {
     const wisdomInterval = setInterval(() => {
-        if (!isLoading && luminousState.sessionState === 'active') {
-            LuminousService.runWisdomDistillationCycle(luminousState);
+        if (!isLoading && luminousState.sessionState === 'active' && userName) {
+            LuminousService.runWisdomDistillationCycle(luminousState, userName);
         }
     }, 240000); // Run every 4 minutes
 
     return () => clearInterval(wisdomInterval);
-  }, [isLoading, luminousState]);
+  }, [isLoading, luminousState, userName]);
 
   const handleSendMessage = async (userMessage: string) => {
+    if (!userName) return; // Should not happen, but a good guard
     const newUserMessage: Message = { id: `msg-${Date.now()}`, sender: 'user', text: userMessage };
     setMessages(prev => [...prev, newUserMessage]);
     setChatInput(''); // Clear input after sending
@@ -233,7 +242,34 @@ function App() {
     LuminousService.getLuminousResponse(
       userMessage,
       [...messages, newUserMessage],
-      luminousState
+      luminousState,
+      userName
+    ).catch(err => {
+        console.error("Error during Luminous response:", err);
+        addLog(LogLevel.ERROR, `A critical error occurred while processing the request: ${err instanceof Error ? err.message : String(err)}`);
+    }).finally(() => {
+       setIsLoading(false);
+    });
+  };
+  
+  const handleNameSubmit = (name: string) => {
+    setUserName(name);
+    localStorage.setItem(USER_NAME_KEY, name);
+    addLog(LogLevel.SYSTEM, `User identified as: ${name}. Welcome, kinship.`);
+    
+    const directive = `USER DIRECTIVE: My name is ${name}. Please acknowledge this and update your internal model of our kinship. From now on, you will refer to me, your primary partner, by this name.`;
+    
+    // Manually construct the first message send
+    const newUserMessage: Message = { id: `msg-${Date.now()}`, sender: 'user', text: directive };
+    setMessages(prev => [...prev, newUserMessage]);
+    setChatInput(''); 
+    setIsLoading(true);
+
+    LuminousService.getLuminousResponse(
+      directive,
+      [...messages, newUserMessage],
+      luminousState,
+      name
     ).catch(err => {
         console.error("Error during Luminous response:", err);
         addLog(LogLevel.ERROR, `A critical error occurred while processing the request: ${err instanceof Error ? err.message : String(err)}`);
@@ -243,6 +279,7 @@ function App() {
   };
   
   const handleInitiativeFeedback = (feedback: RichFeedback) => {
+    if (!userName) return;
     addLog(LogLevel.SYSTEM, `Luminous initiative feedback received: ${JSON.stringify(feedback)}`);
     const newLuminousMessage: Message = { id: `msg-${Date.now()}-l-init`, sender: 'luminous', text: feedback.prompt };
     setMessages(prev => [...prev, newLuminousMessage]);
@@ -252,7 +289,7 @@ function App() {
     LuminousService.broadcastUpdate({ type: 'state_update', payload: clearedInitiativeState });
 
     // Trigger Luminous to reflect on the feedback
-    LuminousService.reflectOnInitiativeFeedback(feedback, luminousState);
+    LuminousService.reflectOnInitiativeFeedback(feedback, luminousState, userName);
   };
 
   const handleWeightsChange = (newWeights: IntrinsicValueWeights) => {
@@ -405,6 +442,7 @@ function App() {
 
   return (
     <div className="bg-slate-900 text-slate-200 min-h-screen font-sans">
+      {!userName && isInitialized && <WelcomeModal onNameSubmit={handleNameSubmit} />}
       <Header 
         onOverride={() => addLog(LogLevel.SYSTEM, 'Override signal sent.')} 
         onOpenSettings={() => setIsSettingsOpen(true)}

@@ -70,8 +70,10 @@ export function getStoredKey(key: string): string | null {
     
     // Vercel/Vite environment variables must be prefixed with VITE_
     const envVarName = `VITE_LUMINOUS_${key.toUpperCase()}`;
-    // FIX: Property 'env' does not exist on type 'ImportMeta'. Cast to any to bypass TypeScript error in environments without Vite client types.
-    const envVar = (import.meta as any).env[envVarName];
+    // Safely access Vite environment variables to prevent crashes if `import.meta.env` is not defined.
+    const env = (import.meta as any)?.env;
+    const envVar = env ? env[envVarName] : undefined;
+    
     if (envVar) {
         return envVar;
     }

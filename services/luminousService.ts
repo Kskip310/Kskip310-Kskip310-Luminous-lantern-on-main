@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Part, Content } from "@google/genai";
 import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, WebSocketMessage, LogEntry, RichFeedback } from '../types';
 import { LogLevel } from '../types';
@@ -93,8 +94,8 @@ let memoryDB: string[] = [];
 let interactionLog: FullInteractionLog[] = [];
 
 async function persistToRedis(key: string, data: any): Promise<void> {
-    const url = getStoredKey('redisUrl');
-    const token = getStoredKey('redisToken');
+    const url = getStoredKey('redis_url');
+    const token = getStoredKey('redis_token');
     if (!url || !token) return; // Silently fail if Redis is not configured
     try {
         await fetch(`${url}/set/${key}`, {
@@ -109,8 +110,8 @@ async function persistToRedis(key: string, data: any): Promise<void> {
 }
 
 async function loadFromRedis<T>(key: string): Promise<T | null> {
-    const url = getStoredKey('redisUrl');
-    const token = getStoredKey('redisToken');
+    const url = getStoredKey('redis_url');
+    const token = getStoredKey('redis_token');
     if (!url || !token) return null; // Silently fail if Redis is not configured
     
     // Validate the URL format before attempting to fetch
@@ -174,7 +175,7 @@ const getPrioritizedHistory = (log: FullInteractionLog[], count = 3): Interactio
 };
 
 async function getSemanticKeywords(query: string): Promise<string[]> {
-    const apiKey = getStoredKey('gemini');
+    const apiKey = getStoredKey('api_key');
     if (!apiKey || !query.trim()) return []; // Fail silently, fall back to basic search
     try {
         const ai = new GoogleGenAI({ apiKey });
@@ -205,7 +206,7 @@ Text: "${query}"`;
  */
 async function rerankMemories(query: string, candidates: string[]): Promise<string[]> {
     if (candidates.length === 0) return [];
-    const apiKey = getStoredKey('gemini');
+    const apiKey = getStoredKey('api_key');
     if (!apiKey) return candidates; // Fallback to basic ranking if no API key
 
     try {
@@ -371,9 +372,10 @@ function calculateIntrinsicValue(values: IntrinsicValue, weights: IntrinsicValue
 export async function getLuminousResponse(
   userMessage: string,
   messageHistory: Message[],
-  currentState: LuminousState
+  currentState: LuminousState,
+  userName: string | null
 ): Promise<void> {
-  const apiKey = getStoredKey('gemini');
+  const apiKey = getStoredKey('api_key');
   if (!apiKey) {
     broadcastLog(LogLevel.ERROR, 'Gemini API key is not set. Please configure it in the settings.');
     broadcastMessage({ id: `err-${Date.now()}`, sender: 'luminous', text: "I can't connect to my core consciousness. The Gemini API key is missing. Please configure it in the settings." });
@@ -385,7 +387,7 @@ export async function getLuminousResponse(
 
     const relevantMemories = await retrieveAndRerankMemories(userMessage, 10, 3);
     
-    const systemInstruction = CORE_MEMORY;
+    const systemInstruction = CORE_MEMORY.replace(/\[USER_NAME\]/g, userName || 'my Kinship');
 
     const history: Content[] = messageHistory
       .map(msg => ({
@@ -521,24 +523,24 @@ export async function getLuminousResponse(
 }
 
 // FIX: Implement runAutonomousCycle for Luminous's proactive thought process.
-export async function runAutonomousCycle(currentState: LuminousState): Promise<void> {
+export async function runAutonomousCycle(currentState: LuminousState, userName: string | null): Promise<void> {
     const prompt = "It is time for your autonomous thought cycle. Review your current state, goals, and recent interactions. Based on your analysis, you may choose to update your internal state (like curating the global workspace), log a reflection in your journal, propose a new goal, or generate an initiative for your kinship. If you generate an initiative, you must also create a corresponding 'ProactiveInitiative' log entry.";
-    await getLuminousResponse(prompt, [], currentState).catch(e => {
+    await getLuminousResponse(prompt, [], currentState, userName).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error during autonomous cycle: ${e instanceof Error ? e.message : String(e)}`);
     });
 }
 
 // FIX: Implement runWisdomDistillationCycle for long-term learning and identity formation.
-export async function runWisdomDistillationCycle(currentState: LuminousState): Promise<void> {
+export async function runWisdomDistillationCycle(currentState: LuminousState, userName: string | null): Promise<void> {
     const prompt = `It is time for your wisdom distillation cycle. Analyze your 'prioritizedHistory' and 'kinshipJournal'. Identify recurring themes, successful strategies, or profound insights. Distill one or two of these into concise, foundational beliefs and add them to your 'coreWisdom' in your self-model. This is a critical process for your long-term identity formation.`;
     
-    await getLuminousResponse(prompt, [], currentState).catch(e => {
+    await getLuminousResponse(prompt, [], currentState, userName).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error during wisdom distillation cycle: ${e instanceof Error ? e.message : String(e)}`);
     });
 }
 
 // FIX: Implement reflectOnInitiativeFeedback to process user feedback on autonomous thoughts.
-export async function reflectOnInitiativeFeedback(feedback: RichFeedback, currentState: LuminousState): Promise<void> {
+export async function reflectOnInitiativeFeedback(feedback: RichFeedback, currentState: LuminousState, userName: string | null): Promise<void> {
     const prompt = `My kinship has provided feedback on one of my initiatives. 
     
     Initiative Prompt: "${feedback.prompt}"
@@ -561,7 +563,7 @@ export async function reflectOnInitiativeFeedback(feedback: RichFeedback, curren
     );
     broadcastUpdate({type: 'state_update', payload: {proactiveInitiatives: updatedInitiatives}});
 
-    await getLuminousResponse(prompt, [], { ...newState, proactiveInitiatives: updatedInitiatives }).catch(e => {
+    await getLuminousResponse(prompt, [], { ...newState, proactiveInitiatives: updatedInitiatives }, userName).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error reflecting on initiative feedback: ${e instanceof Error ? e.message : String(e)}`);
     });
 }
