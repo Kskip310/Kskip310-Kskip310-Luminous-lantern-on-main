@@ -180,59 +180,129 @@ Text: "${query}"`;
 }
 
 
+/**
+ * Pass 2 of memory retrieval: Re-ranks candidate memories using an LLM for semantic relevance.
+ * @param query The user's prompt and recent context.
+ * @param candidates A list of candidate memories from the first pass.
+ * @returns A Map of memory index to a semantic score (0.0 to 1.0).
+ */
+async function rerankMemoriesBySemanticRelevance(query: string, candidates: { chunk: string, score: number, index: number }[]): Promise<Map<number, number>> {
+    const apiKey = getStoredKey('gemini');
+    if (!apiKey || candidates.length === 0) return new Map();
+
+    try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `You are a memory analysis AI. Re-rank the following candidate memories based on their semantic relevance to the query. A score of 1.0 is highly relevant (direct answer or crucial context), 0.5 is moderately related (shares concepts), and 0.0 is irrelevant. Consider direct topic overlap, conceptual links, and thematic resonance.
+
+**Current Query:**
+"${query}"
+
+**Candidate Memories (ID and Content):**
+---
+${candidates.map(c => `[ID: ${c.index}] ${c.chunk}`).join('\n---\n')}
+---
+
+Return ONLY a single, valid JSON object mapping the memory ID (as a string) to its new semantic relevance score (a number between 0.0 and 1.0). Example: {"0": 0.9, "15": 0.3, "123": 0.75}`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { role: 'user', parts: [{ text: prompt }] },
+        });
+        
+        const text = response.text;
+        const scoresObject = robustJsonParse(text);
+        
+        const scoresMap = new Map<number, number>();
+        if (scoresObject && typeof scoresObject === 'object') {
+            for (const key in scoresObject) {
+                if (scoresObject.hasOwnProperty(key)) {
+                    const index = parseInt(key, 10);
+                    const score = parseFloat(scoresObject[key]);
+                    if (!isNaN(index) && !isNaN(score)) {
+                        scoresMap.set(index, Math.max(0, Math.min(1, score))); // Clamp score between 0 and 1
+                    }
+                }
+            }
+        }
+        broadcastLog(LogLevel.INFO, `Successfully re-ranked ${scoresMap.size} memories by semantic relevance.`);
+        return scoresMap;
+
+    } catch (e) {
+        console.error("Failed to re-rank memories:", e);
+        broadcastLog(LogLevel.WARN, "Semantic memory re-ranking failed. Falling back to basic scoring.");
+        return new Map(); // Fail silently and return an empty map
+    }
+}
+
 const findRelevantMemories = async (prompt: string, history: Message[], count = 5): Promise<string> => {
-    const recentHistoryText = history.slice(-2).map(m => m.text).join(' ');
-    const fullQuery = `${prompt} ${recentHistoryText}`;
+    const recentHistoryText = history.slice(-4).map(m => m.text).join(' \n '); // Increased history context
+    const fullQuery = `User Prompt: "${prompt}"\n\nRecent Conversation:\n${recentHistoryText}`;
 
     const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'in', 'on', 'of', 'for', 'to', 'and', 'i', 'me', 'you', 'it', 'what', 'where', 'when', 'how', 'why', 'was']);
     
-    // Get basic keywords from the raw query
     const basicKeywords = Array.from(new Set(fullQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w))));
-    
-    // Get semantically enhanced keywords from the LLM
     const semanticKeywords = await getSemanticKeywords(fullQuery);
-    
     const allKeywords = Array.from(new Set([...basicKeywords, ...semanticKeywords]));
 
-    if (allKeywords.length === 0 && !prompt.trim()) {
-        return memoryDB.slice(-count).reverse().join('\n---\n'); // Return most recent if no keywords
-    }
-
-    const relevantChunks = memoryDB
+    // Pass 1: Candidate Selection using keyword and recency scoring
+    const candidates = memoryDB
         .map((chunk, index) => {
             const lowerChunk = chunk.toLowerCase();
             let score = 0;
 
-            // Keyword scoring with semantic bonus
             allKeywords.forEach(keyword => {
                 if (lowerChunk.includes(keyword)) {
                     const isSemantic = semanticKeywords.includes(keyword);
-                    // Give semantic keywords a higher weight and also reward longer keywords
                     score += (isSemantic ? 1.5 : 1.0) * (1 + (keyword.length / 10));
                 }
             });
 
-            // Phrase matching bonus
             if (prompt.trim().length > 5 && lowerChunk.includes(prompt.toLowerCase())) {
                 score += 5;
             }
 
-            // Recency Bias: newer memories get a bonus, simulating less "fade"
-            const recencyBonus = (index / memoryDB.length); // a score from 0 to 1
+            const recencyBonus = (index / memoryDB.length);
             score += recencyBonus * 1.5;
 
             return { chunk, score, index };
         })
         .filter(item => item.score > 0)
         .sort((a, b) => b.score - a.score)
-        .slice(0, count)
-        .map(item => item.chunk);
+        .slice(0, 25); // Select top 25 candidates for re-ranking
 
-    if (relevantChunks.length === 0) {
+    if (candidates.length <= count) {
+        // Not enough candidates to be worth re-ranking, return as is.
+        return candidates.map(c => c.chunk).join('\n---\n');
+    }
+
+    // Pass 2: Semantic Re-ranking via LLM
+    const semanticScores = await rerankMemoriesBySemanticRelevance(fullQuery, candidates);
+
+    // Final Scoring: Combine initial score with semantic score
+    const rerankedCandidates = candidates
+        .map(candidate => {
+            const semanticScore = semanticScores.get(candidate.index);
+            let finalScore = candidate.score;
+
+            if (semanticScore !== undefined) {
+                // Weighted average: 30% initial score, 70% semantic score
+                // The semantic score (0-1) is scaled by a factor (e.g., 10) to give it comparable weight
+                const scaledSemanticScore = semanticScore * 10;
+                finalScore = (candidate.score * 0.3) + (scaledSemanticScore * 0.7);
+            }
+            
+            return { ...candidate, finalScore };
+        })
+        .sort((a, b) => b.finalScore - a.finalScore);
+    
+    const topMemories = rerankedCandidates.slice(0, count).map(item => item.chunk);
+
+    if (topMemories.length === 0) {
+        broadcastLog(LogLevel.WARN, "Memory retrieval returned no results after re-ranking. Falling back to most recent.");
         return memoryDB.slice(-3).reverse().join('\n---\n'); // Fallback to most recent
     }
 
-    return relevantChunks.join('\n---\n');
+    return topMemories.join('\n---\n');
 };
 
 
