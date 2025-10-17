@@ -339,12 +339,10 @@ function App() {
     if (name.trim()) {
       const trimmedName = name.trim();
       localStorage.setItem(USER_NAME_KEY, trimmedName);
-      setUserName(trimmedName);
-      addLog(LogLevel.SYSTEM, `User identified as: ${trimmedName}`);
-      if (!isInitialized) {
-          // If this is the very first launch, re-trigger initialization
-          window.location.reload();
-      }
+      // Always reload the window. This ensures that the entire application
+      // initializes with the user's context from the start, providing a more stable and predictable startup
+      // and avoiding potential race conditions with data initialization.
+      window.location.reload();
     }
   };
 
