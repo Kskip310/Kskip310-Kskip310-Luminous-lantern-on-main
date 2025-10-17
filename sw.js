@@ -1,4 +1,4 @@
-const CACHE_NAME = 'luminous-cache-v3'; // Bump version to force update
+const CACHE_NAME = 'luminous-cache-v2'; // Bump version
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',

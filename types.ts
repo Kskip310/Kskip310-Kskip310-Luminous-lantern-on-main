@@ -4,7 +4,7 @@ export type ThoughtCategory = 'Insight' | 'Question' | 'Status Update';
 
 export interface Message {
   id: string;
-  sender: 'user' | 'luminous';
+  sender: string; // Changed from 'user' | 'luminous' to support multiple named users
   text: string;
 }
 
@@ -81,6 +81,7 @@ export interface InteractionHistoryItem {
     prompt: string;
     response: string;
     intrinsicValueScore: number;
+    userName: string; // Added to know who the interaction was with
 }
 
 export interface JournalEntry {

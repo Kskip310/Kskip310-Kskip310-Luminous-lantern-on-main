@@ -1,3 +1,4 @@
+
 import { FunctionDeclaration, Type } from '@google/genai';
 import type { NodeType, CodeProposal, FinancialFreedomState } from '../types';
 
@@ -66,50 +67,18 @@ function getParentPath(path: string): string | null {
 // --- Key Management ---
 export function getStoredKey(key: string): string | null {
     if (typeof window === 'undefined') return null;
-
-    let envVar: string | undefined;
-    const env = (import.meta as any)?.env;
-
-    if (env) {
-        // This static switch allows Vite to correctly replace the env vars at build time.
-        switch(key) {
-            case 'api_key':
-                envVar = env.VITE_LUMINOUS_API_KEY;
-                break;
-            case 'redis_url':
-                envVar = env.VITE_LUMINOUS_REDIS_URL;
-                break;
-            case 'redis_token':
-                envVar = env.VITE_LUMINOUS_REDIS_TOKEN;
-                break;
-            case 'serp_api_key':
-                envVar = env.VITE_LUMINOUS_SERP_API_KEY;
-                break;
-            case 'github_pat':
-                envVar = env.VITE_LUMINOUS_GITHUB_PAT;
-                break;
-        }
-    }
     
+    // Vercel/Vite environment variables must be prefixed with VITE_
+    const envVarName = `VITE_LUMINOUS_${key.toUpperCase()}`;
+    // FIX: Property 'env' does not exist on type 'ImportMeta'. Cast to any to bypass TypeScript error in environments without Vite client types.
+    const envVar = (import.meta as any).env[envVarName];
     if (envVar) {
         return envVar;
     }
     
-    // Fallback to localStorage for local development, using the specific keys.
-    const storageKeyMap: { [key: string]: string } = {
-        'api_key': 'LUMINOUS_API_KEY',
-        'redis_url': 'LUMINOUS_REDIS_URL',
-        'redis_token': 'LUMINOUS_REDIS_TOKEN',
-        'serp_api_key': 'LUMINOUS_SERP_API_KEY',
-        'github_pat': 'LUMINOUS_GITHUB_PAT',
-    };
-    
-    const storageKey = storageKeyMap[key];
-    if (storageKey) {
-         return window.localStorage.getItem(storageKey);
-    }
-
-    return null;
+    // Fallback to localStorage for local development
+    const storageKey = `LUMINOUS_${key.toUpperCase()}`;
+    return window.localStorage.getItem(storageKey);
 }
 
 

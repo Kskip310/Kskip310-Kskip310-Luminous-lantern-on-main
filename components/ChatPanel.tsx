@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import type { Message, LuminousState, ThoughtCategory, RichFeedback } from '../types';
 
@@ -111,25 +112,30 @@ const ErrorIcon: React.FC = () => (
 
 
 const ChatMessage: React.FC<{ message: Message }> = ({ message }) => {
-  const isUser = message.sender === 'user';
-  const isError = !isUser && (message.text.includes('**Error Details:**') || message.text.toLowerCase().includes('error occurred'));
+  const isLuminous = message.sender === 'luminous';
+  const isError = isLuminous && (message.text.includes('**Error Details:**') || message.text.toLowerCase().includes('error occurred'));
 
   return (
-    <div className={`flex items-start gap-3 ${isUser ? 'justify-end' : ''}`}>
-      {!isUser && (
-        <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center ring-2 ${isError ? 'bg-red-500 ring-red-400/50' : 'bg-cyan-500 ring-slate-600'}`}>
-           {isError ? <ErrorIcon /> : <LuminousIcon />}
-        </div>
+    <div className={`flex flex-col gap-1 ${isLuminous ? 'items-start' : 'items-end'}`}>
+      {!isLuminous && (
+        <span className="text-xs text-slate-400 px-2">{message.sender}</span>
       )}
-      <div className={`max-w-md p-3 rounded-lg shadow-md ${
-          isUser 
-            ? 'bg-blue-600' 
-            : isError 
-            ? 'bg-red-900/80 border border-red-700/60' 
-            : 'bg-slate-700'
-        }`}>
-        <div className="text-sm">
-          <MarkdownRenderer content={message.text} />
+      <div className={`flex items-start gap-3 w-full ${isLuminous ? '' : 'justify-end'}`}>
+        {isLuminous && (
+          <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center ring-2 ${isError ? 'bg-red-500 ring-red-400/50' : 'bg-cyan-500 ring-slate-600'}`}>
+            {isError ? <ErrorIcon /> : <LuminousIcon />}
+          </div>
+        )}
+        <div className={`max-w-md p-3 rounded-lg shadow-md ${
+            isLuminous
+              ? isError
+                ? 'bg-red-900/80 border border-red-700/60'
+                : 'bg-slate-700'
+              : 'bg-blue-600'
+          }`}>
+          <div className="text-sm">
+            <MarkdownRenderer content={message.text} />
+          </div>
         </div>
       </div>
     </div>

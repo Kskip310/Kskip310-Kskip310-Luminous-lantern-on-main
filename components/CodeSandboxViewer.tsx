@@ -56,7 +56,6 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
     status: 'idle'
   });
   const [selectedLanguage, setSelectedLanguage] = useState<'javascript' | 'python'>('javascript');
-  const [pythonPackages, setPythonPackages] = useState('numpy');
   
   const pyodideRef = useRef<any>(null);
   const installedPackages = useRef(new Set<string>());
@@ -138,16 +137,33 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
         try {
           const py = pyodideRef.current;
           
-          // --- Package Installation Step ---
-          const requiredPackages = pythonPackages.split(',').map(p => p.trim()).filter(Boolean);
+          // --- Automatic Package Detection & Installation ---
+          const importRegex = /(?:^|\n)\s*(?:from|import)\s+([a-zA-Z0-9_.]+)/g;
+          const detectedModules = new Set<string>();
+          let match;
+          while ((match = importRegex.exec(userCode.python)) !== null) {
+            detectedModules.add(match[1].split('.')[0]);
+          }
+
+          const requiredPackages = [...detectedModules];
           const packagesToInstall = requiredPackages.filter(p => !installedPackages.current.has(p));
 
           if (packagesToInstall.length > 0) {
-              setUserOutput({ output: `Installing packages: ${packagesToInstall.join(', ')}...`, status: 'idle' });
+              const confirmed = window.confirm(
+                  `This code appears to use the following uninstalled packages:\n\n- ${packagesToInstall.join('\n- ')}\n\nDo you want to automatically install them and continue?`
+              );
+              
+              if (!confirmed) {
+                  setUserOutput({ output: 'Execution cancelled by user. Required packages were not installed.', status: 'error' });
+                  return;
+              }
+
+              setUserOutput({ output: `Installing detected packages: ${packagesToInstall.join(', ')}...`, status: 'idle' });
               await py.loadPackage(packagesToInstall);
               packagesToInstall.forEach(p => installedPackages.current.add(p));
               executionLog += `Packages installed successfully: ${packagesToInstall.join(', ')}\n\n`;
           }
+          // --- End of Package Logic ---
 
           // --- Code Execution Step ---
           setUserOutput({ output: executionLog + 'Executing Python code...', status: 'idle' });
@@ -209,18 +225,9 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
                 placeholder={`// Your ${selectedLanguage} code here...`}
             />
             {selectedLanguage === 'python' && (
-              <div className="mt-2">
-                  <label className="block text-xs font-medium text-slate-400 mb-1">
-                      Required Packages (comma-separated)
-                  </label>
-                  <input
-                      type="text"
-                      value={pythonPackages}
-                      onChange={(e) => setPythonPackages(e.target.value)}
-                      className="w-full bg-slate-900/70 p-2 rounded-md text-xs font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                      placeholder="e.g., numpy, pandas, matplotlib"
-                  />
-              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                Required packages (e.g., numpy, pandas) will be automatically detected from your import statements.
+              </p>
             )}
             <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 p-2 rounded-md">
                 <strong>Security Warning:</strong> Executing untrusted code can be risky. The sandbox attempts to limit access to sensitive browser APIs, but it is not foolproof.

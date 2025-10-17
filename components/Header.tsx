@@ -4,9 +4,11 @@ import SettingsIcon from './icons/SettingsIcon';
 interface HeaderProps {
   onOverride: () => void;
   onOpenSettings: () => void;
+  onSwitchUser: () => void;
+  userName: string | null;
 }
 
-const Header: React.FC<HeaderProps> = ({ onOverride, onOpenSettings }) => {
+const Header: React.FC<HeaderProps> = ({ onOverride, onOpenSettings, onSwitchUser, userName }) => {
   return (
     <header className="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-700 flex items-center justify-between shadow-lg sticky top-0 z-10">
       <div className="flex items-center">
@@ -14,6 +16,19 @@ const Header: React.FC<HeaderProps> = ({ onOverride, onOpenSettings }) => {
         <h1 className="text-xl font-bold text-slate-100 tracking-wider">Luminous Synergy Skipper</h1>
       </div>
       <div className="flex items-center space-x-4">
+        {userName && (
+          <div className="flex items-center space-x-2 text-sm">
+            <span className="text-slate-400">Interacting as:</span>
+            <span className="font-bold text-cyan-300">{userName}</span>
+            <button
+              onClick={onSwitchUser}
+              className="text-xs text-slate-400 hover:text-cyan-400"
+              title="Switch or correct user"
+            >
+              (Switch)
+            </button>
+          </div>
+        )}
         <button
           onClick={onOverride}
           className="px-3 py-1 text-sm font-semibold bg-red-500/20 text-red-300 rounded-md border border-red-500/50 hover:bg-red-500/40 transition-colors"
