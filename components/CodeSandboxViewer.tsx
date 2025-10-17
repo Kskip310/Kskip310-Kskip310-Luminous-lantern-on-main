@@ -5,7 +5,6 @@ import Card from './common/Card';
 
 declare global {
   interface Window {
-    // FIX: Updated the type definition for loadPyodide to be consistent across the application, allowing for optional arguments.
     loadPyodide: (options?: { indexURL: string }) => Promise<any>;
   }
 }
@@ -49,9 +48,6 @@ interface CodeSandboxViewerProps {
 }
 
 const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onSaveOutput, onUnleash }) => {
-  const [isSaving, setIsSaving] = useState(false);
-  const [filename, setFilename] = useState(`/sandbox/output-${Date.now()}.txt`);
-  
   const [userCode, setUserCode] = useState({
     javascript: '// Your JavaScript code here\n// Use console.log for multiple outputs\nreturn "Hello from user sandbox!";',
     python: '# Your Python code here\n# Use print() for output\n"Hello from Python sandbox!"'
@@ -83,17 +79,13 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
   const canSave = sandboxState.output && sandboxState.output.trim() !== 'Code has not been executed yet.' && sandboxState.output.trim() !== '';
 
   const handleSaveClick = () => {
-    if (filename.trim()) {
-      onSaveOutput(filename.trim());
-      setIsSaving(false);
-    }
-  };
+    if (!canSave) return;
+    const defaultFilename = `/sandbox/output-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+    const chosenFilename = window.prompt("Enter a filename to save the Luminous output:", defaultFilename);
 
-  const handleToggleSave = () => {
-    if (!isSaving) {
-       setFilename(`/sandbox/output-${Date.now()}.txt`);
+    if (chosenFilename && chosenFilename.trim()) {
+      onSaveOutput(chosenFilename.trim());
     }
-    setIsSaving(!isSaving);
   };
   
   const handleUserExecute = async () => {
@@ -110,7 +102,20 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
         };
 
         try {
-            const result = await new Function(`return (async () => { ${userCode.javascript} })();`)();
+            const sandboxedCode = `
+              // Shadow dangerous globals to mitigate security risks
+              const window = undefined;
+              const document = undefined;
+              const self = undefined;
+              const globalThis = undefined;
+              const fetch = () => Promise.reject(new Error('fetch is disabled in this sandbox.'));
+              const XMLHttpRequest = undefined;
+              
+              // User code is executed inside this async IIFE
+              ${userCode.javascript}
+            `;
+            const result = await new Function(`return (async () => { ${sandboxedCode} })();`)();
+            
             let finalOutput = logs.join('\n');
             if (result !== undefined) {
                 const resultString = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
@@ -186,6 +191,9 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
                 className="w-full bg-slate-900/70 p-3 rounded-md text-xs font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 h-32"
                 placeholder={`// Your ${selectedLanguage} code here...`}
             />
+            <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 p-2 rounded-md">
+                <strong>Security Warning:</strong> Executing untrusted code can be risky. The sandbox attempts to limit access to sensitive browser APIs, but it is not foolproof.
+            </div>
             <button
                 onClick={handleUserExecute}
                 disabled={selectedLanguage === 'python' && pyodideStatus !== 'ready'}
@@ -238,7 +246,7 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
             <div className="flex justify-between items-center mb-2 mt-4">
             <h4 className="text-sm font-semibold text-purple-300">Luminous Output</h4>
             <button 
-                onClick={handleToggleSave}
+                onClick={handleSaveClick}
                 disabled={!canSave}
                 className="p-1 text-slate-400 hover:text-cyan-400 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors"
                 title="Save output to virtual file"
@@ -246,24 +254,6 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
                 <SaveIcon />
             </button>
             </div>
-            {isSaving && (
-            <div className="flex items-center gap-2 mb-2 p-2 bg-slate-700/50 rounded-md">
-                <input 
-                type="text"
-                value={filename}
-                onChange={(e) => setFilename(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-600 rounded-md p-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                placeholder="/path/to/file.txt"
-                />
-                <button 
-                onClick={handleSaveClick}
-                disabled={!filename.trim()}
-                className="px-3 py-1.5 text-xs font-semibold bg-cyan-600 text-white rounded-md hover:bg-cyan-500 transition-colors disabled:bg-slate-500 disabled:cursor-not-allowed"
-                >
-                Save
-                </button>
-            </div>
-            )}
             <pre className="bg-slate-900/70 p-3 rounded-md text-xs font-mono overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 max-h-48">
             <code>
                 {sandboxState.output}

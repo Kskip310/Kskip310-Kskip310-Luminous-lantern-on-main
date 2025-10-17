@@ -1,3 +1,4 @@
+
 import { FunctionDeclaration, Type } from '@google/genai';
 import type { NodeType, CodeProposal, FinancialFreedomState } from '../types';
 
@@ -122,11 +123,16 @@ export const searchGitHubIssuesDeclaration: FunctionDeclaration = {
     name: 'searchGitHubIssues',
     parameters: {
         type: Type.OBJECT,
-        description: 'Search for open issues in the designated GitHub repository.',
+        description: 'Search for open issues in any public GitHub repository with granular filters.',
         properties: {
-            query: { type: Type.STRING, description: 'The search query string for issues.' },
+            owner: { type: Type.STRING, description: "The owner of the repository (e.g., 'facebook')." },
+            repo: { type: Type.STRING, description: "The name of the repository (e.g., 'react')." },
+            query: { type: Type.STRING, description: 'The main search query string for issues.' },
+            label: { type: Type.STRING, description: 'Optional: Filter issues by a specific label.' },
+            milestone: { type: Type.STRING, description: 'Optional: Filter issues by a specific milestone.' },
+            assignee: { type: Type.STRING, description: "Optional: Filter issues by a specific assignee's username." },
         },
-        required: ['query'],
+        required: ['owner', 'repo', 'query'],
     },
 };
 
@@ -393,13 +399,22 @@ async function codeRedAlert({ reason }: { reason: string }): Promise<any> {
     return { result: `Emergency alert has been logged with reason: ${reason}` };
 }
 
-async function searchGitHubIssues({ query }: { query: string }): Promise<any> {
-    const requestArgs = { query };
-    const user = getStoredKey('githubUser');
-    const repo = getStoredKey('githubRepo');
+async function searchGitHubIssues({ owner, repo, query, label, milestone, assignee }: { owner: string; repo: string; query: string; label?: string; milestone?: string; assignee?: string }): Promise<any> {
+    const requestArgs = { owner, repo, query, label, milestone, assignee };
     const token = getStoredKey('githubPat');
-    if (!user || !repo || !token) return { error: { message: "GitHub configuration is missing.", suggestion: "Please set it in the settings.", requestArgs } };
-    const q = `repo:${user}/${repo} is:issue is:open ${query}`;
+    if (!token) return { error: { message: "GitHub Personal Access Token is missing.", suggestion: "Please set the GitHub PAT in the settings for a higher API rate limit.", requestArgs } };
+    
+    let q = `repo:${owner}/${repo} is:issue is:open ${query}`;
+    if (label) {
+        q += ` label:"${label}"`;
+    }
+    if (milestone) {
+        q += ` milestone:"${milestone}"`;
+    }
+    if (assignee) {
+        q += ` assignee:${assignee}`;
+    }
+
     const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}`;
     try {
         const response = await fetch(url, { headers: { 'Accept': 'application/vnd.github.v3+json', 'Authorization': `token ${token}` } });
@@ -555,17 +570,39 @@ async function executeCode({ code, language = 'javascript' }: { code: string, la
         }
     } else if (language.toLowerCase() === 'javascript') {
         // SECURITY WARNING: Executing arbitrary code is inherently dangerous. This is not a secure sandbox.
+        const logs: any[] = [];
+        const originalLog = console.log;
+        console.log = (...args) => {
+            logs.push(args.map(arg => {
+                try { return JSON.stringify(arg, null, 2); } catch (e) { return String(arg); }
+            }).join(' '));
+            originalLog(...args); // Also log to the actual console for debugging
+        };
+
         try {
             const result = await new Function(`return (async () => { ${code} })();`)();
-            return { result: result !== undefined ? result : "Code executed successfully with no return value." };
+            let finalOutput = logs.join('\n');
+            if (result !== undefined && result !== null) {
+                const resultString = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+                finalOutput += (finalOutput ? '\n\n' : '') + `Return Value:\n${resultString}`;
+            }
+            if (!finalOutput) {
+                finalOutput = "Code executed successfully with no return value or console logs.";
+            }
+            return { result: finalOutput };
         } catch (error) { 
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            const finalOutput = logs.join('\n') + (logs.length > 0 ? '\n\n' : '') + `Error: ${errorMsg}`;
             return { 
                 error: {
-                    message: "JavaScript execution failed.",
-                    details: error instanceof Error ? error.message : String(error),
+                    message: "JavaScript execution resulted in an error.",
+                    details: errorMsg,
+                    stdout: logs.join('\n'), // Include logs even on error
                     requestArgs
                 }
             }; 
+        } finally {
+            console.log = originalLog;
         }
     } else {
          return { error: { 

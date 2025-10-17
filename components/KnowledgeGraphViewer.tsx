@@ -16,6 +16,8 @@ interface D3Edge extends d3Force.SimulationLinkDatum<D3Node> {
     id: string;
     label: string;
     weight?: number;
+    source: string | D3Node;
+    target: string | D3Node;
 }
 
 // --- Constants ---
@@ -38,10 +40,10 @@ const styles = `
     transition: opacity 300ms ease-in-out;
   }
   .node-group circle {
-     transition: r 300ms ease-in-out;
+     transition: r 300ms ease-in-out, stroke-width 300ms ease-in-out;
   }
   .node-group text {
-     transition: opacity 300ms ease-in-out, y 300ms ease-in-out;
+     transition: opacity 300ms ease-in-out, font-size 300ms ease-in-out, y 300ms ease-in-out;
   }
   .link {
     transition: stroke-opacity 300ms ease-in-out, stroke-width 300ms ease-in-out;
@@ -60,28 +62,33 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
   const nodeSelectionRef = useRef<Selection<SVGGElement, D3Node, SVGGElement, unknown>>();
   const linkSelectionRef = useRef<Selection<SVGLineElement, D3Edge, SVGGElement, unknown>>();
 
+  // Memoize graph data to prevent unnecessary re-renders if the graph object reference changes but content is the same.
+  const nodes = useMemo(() => graph?.nodes || [], [graph]);
+  const edges = useMemo(() => graph?.edges || [], [graph]);
+
+
   const edgeCounts = useMemo(() => {
     const counts = new Map<string, { in: number; out: number }>();
-    if (!graph?.nodes || !graph?.edges) {
+    if (!nodes || !edges) {
       return counts;
     }
     // Initialize counts for all nodes
-    for (const node of graph.nodes) {
+    for (const node of nodes) {
       counts.set(node.id, { in: 0, out: 0 });
     }
     // Tally edges
-    for (const edge of graph.edges) {
-      const sourceNodeCounts = counts.get(edge.source);
+    for (const edge of edges) {
+      const sourceNodeCounts = counts.get(edge.source as string);
       if (sourceNodeCounts) {
         sourceNodeCounts.out += 1;
       }
-      const targetNodeCounts = counts.get(edge.target);
+      const targetNodeCounts = counts.get(edge.target as string);
       if (targetNodeCounts) {
         targetNodeCounts.in += 1;
       }
     }
     return counts;
-  }, [graph.nodes, graph.edges]);
+  }, [nodes, edges]);
 
 
   useEffect(() => {
@@ -102,12 +109,12 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
   // Main D3 setup and simulation effect
   useEffect(() => {
     const svgElement = svgRef.current;
-    if (!svgElement || !graph.nodes.length || dimensions.width === 0) return;
+    if (!svgElement || nodes.length === 0 || dimensions.width === 0) return;
     
     const { width, height } = dimensions;
 
-    const nodesData: D3Node[] = JSON.parse(JSON.stringify(graph.nodes));
-    const edgesData: D3Edge[] = JSON.parse(JSON.stringify(graph.edges));
+    const nodesData: D3Node[] = JSON.parse(JSON.stringify(nodes));
+    const edgesData: D3Edge[] = JSON.parse(JSON.stringify(edges));
 
     const simulation = simulationRef.current ?? d3Force.forceSimulation<D3Node>();
     simulationRef.current = simulation;
@@ -196,18 +203,18 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
 
     simulation.alpha(1).restart();
     
-  }, [graph, dimensions]);
+  }, [nodes, edges, dimensions]);
 
   // Highlighting effect
   const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
     if (!selectedNodeId) return { highlightedNodeIds: new Set(), highlightedEdgeIds: new Set() };
     const nodes = new Set<string>([selectedNodeId]);
-    const edges = new Set<string>();
+    const edgesSet = new Set<string>();
     graph.edges.forEach(edge => {
-      if (edge.source === selectedNodeId) { nodes.add(edge.target); edges.add(edge.id); }
-      if (edge.target === selectedNodeId) { nodes.add(edge.source); edges.add(edge.id); }
+      if (edge.source === selectedNodeId) { nodes.add(edge.target); edgesSet.add(edge.id); }
+      if (edge.target === selectedNodeId) { nodes.add(edge.source); edgesSet.add(edge.id); }
     });
-    return { highlightedNodeIds: nodes, highlightedEdgeIds: edges };
+    return { highlightedNodeIds: nodes, highlightedEdgeIds: edgesSet };
   }, [selectedNodeId, graph.edges]);
 
   useEffect(() => {

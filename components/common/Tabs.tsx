@@ -14,7 +14,7 @@ const Tabs: React.FC<TabsProps> = ({ tabs }) => {
 
   return (
     <div className="flex flex-col h-full bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-lg shadow-lg">
-      <div className="flex border-b border-slate-700 overflow-x-auto">
+      <div className="flex border-b border-slate-700 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
         {tabs.map((tab, index) => (
           <button
             key={tab.label}
@@ -29,15 +29,16 @@ const Tabs: React.FC<TabsProps> = ({ tabs }) => {
           </button>
         ))}
       </div>
-      <div className="flex-grow relative">
+      <div className="flex-grow relative overflow-hidden">
         {tabs.map((tab, index) => (
           <div
             key={tab.label}
-            className={`absolute inset-0 p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 transition-opacity duration-200 ${
-                activeTab === index ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
+            style={{ display: activeTab === index ? 'block' : 'none' }}
+            className="absolute inset-0 h-full"
           >
-            {tab.content}
+             <div className="h-full p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+                {tab.content}
+             </div>
           </div>
         ))}
       </div>
