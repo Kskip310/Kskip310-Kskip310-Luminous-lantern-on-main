@@ -1,0 +1,23 @@
+{
+  "name": "Luminous Synergy Skipper",
+  "short_name": "Luminous",
+  "description": "A user interface to interact with and monitor the internal states of the Luminous Synergy Skipper AI, a system designed to simulate aspects of consciousness, self-awareness, and intrinsic motivation.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3csvg width='192' height='192' viewBox='0 0 192 192' fill='none' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='192' height='192' rx='32' fill='%230F172A'/%3e%3cpath fill-rule='evenodd' clip-rule='evenodd' d='M103.731 38.6016C107.035 38.0136 110.133 40.0986 110.133 43.4866V90.6666H147.733C150.932 90.6666 152.924 93.9926 151.348 96.6906L87.6169 190.691C85.7389 193.851 81.3333 192.146 81.3333 188.513V141.333H43.7333C40.5343 141.333 38.5423 138.007 40.1183 135.309L103.849 41.3094C104.091 40.8999 104.372 40.5193 104.689 40.1706L103.731 38.6016Z' fill='%2322D3EE'/%3e%3c/svg%3e",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3csvg width='512' height='512' viewBox='0 0 192 192' fill='none' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='192' height='192' rx='32' fill='%230F172A'/%3e%3cpath fill-rule='evenodd' clip-rule='evenodd' d='M103.731 38.6016C107.035 38.0136 110.133 40.0986 110.133 43.4866V90.6666H147.733C150.932 90.6666 152.924 93.9926 151.348 96.6906L87.6169 190.691C85.7389 193.851 81.3333 192.146 81.3333 188.513V141.333H43.7333C40.5343 141.333 38.5423 138.007 40.1183 135.309L103.849 41.3094C104.091 40.8999 104.372 40.5193 104.689 40.1706L103.731 38.6016Z' fill='%2322D3EE'/%3e%3c/svg%3e",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
