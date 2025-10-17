@@ -140,9 +140,14 @@ function App() {
     if (savedSession) {
       try {
         const { luminousState: savedLuminousState, messages: savedMessages, logs: savedLogs } = JSON.parse(savedSession);
-        setLuminousState(savedLuminousState);
-        setMessages(savedMessages);
-        setLogs(savedLogs);
+        
+        // Merge with defaults to prevent crashes on state shape changes from older versions.
+        const defaultState = LuminousService.createDefaultLuminousState();
+        const mergedState = deepMerge(defaultState, savedLuminousState || {});
+        
+        setLuminousState(mergedState);
+        setMessages(savedMessages || []);
+        setLogs(savedLogs || []);
         addLog(LogLevel.SYSTEM, "Shared session restored from local storage.");
         setIsInitialized(true);
         return;
