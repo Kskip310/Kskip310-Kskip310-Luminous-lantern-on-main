@@ -23,7 +23,7 @@ const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
 const SESSION_STATE_KEY = 'luminous_session_state'; // Single key for the shared session
 const USER_NAME_KEY = 'luminous_user_name';
 
-// Utility function for deep merging state updates
+// --- Utility Functions ---
 const isObject = (obj: any): obj is object => obj && typeof obj === 'object' && !Array.isArray(obj);
 
 function deepMerge<T extends object>(target: T, source: Partial<T>): T {
@@ -39,6 +39,10 @@ function deepMerge<T extends object>(target: T, source: Partial<T>): T {
     });
   }
   return output;
+}
+
+function camelToSnakeCase(str: string): string {
+    return str.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase();
 }
 
 
@@ -268,7 +272,7 @@ function App() {
 
   const handleSaveSettings = (keys: Record<string, string>) => {
     Object.entries(keys).forEach(([key, value]) => {
-        const storageKey = `LUMINOUS_${key.toUpperCase()}`;
+        const storageKey = `LUMINOUS_${camelToSnakeCase(key)}`;
         if (value) window.localStorage.setItem(storageKey, value);
         else window.localStorage.removeItem(storageKey);
     });

@@ -6,6 +6,10 @@ interface SettingsModalProps {
   onSave: (keys: Record<string, string>) => void;
 }
 
+function camelToSnakeCase(str: string): string {
+    return str.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase();
+}
+
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }) => {
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [redisUrl, setRedisUrl] = useState('');
@@ -29,25 +33,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
     hfApiToken: setHfApiToken,
   };
 
-  const storageKeyMap: Record<string, string> = {
-    gemini: 'LUMINOUS_API_KEY',
-    redisUrl: 'LUMINOUS_REDIS_URL',
-    redisToken: 'LUMINOUS_REDIS_TOKEN',
-    serpApi: 'LUMINOUS_SERP_API_KEY',
-    githubPat: 'LUMINOUS_GITHUB_PAT',
-    githubUser: 'LUMINOUS_GITHUB_USER',
-    githubRepo: 'LUMINOUS_GITHUB_REPO',
-    hfModelUrl: 'LUMINOUS_HF_MODEL_URL',
-    hfApiToken: 'LUMINOUS_HF_API_TOKEN',
-  };
-
   useEffect(() => {
     if (isOpen && typeof window !== 'undefined') {
       for (const [key, setter] of Object.entries(keysToManage)) {
-        const storedValue = window.localStorage.getItem(storageKeyMap[key]);
-        if (storedValue) {
-          setter(storedValue);
-        }
+        const storageKey = `LUMINOUS_${camelToSnakeCase(key)}`;
+        const storedValue = window.localStorage.getItem(storageKey);
+        setter(storedValue || '');
       }
     }
   }, [isOpen]);

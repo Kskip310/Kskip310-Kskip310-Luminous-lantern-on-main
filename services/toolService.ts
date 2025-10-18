@@ -1,4 +1,3 @@
-
 import { FunctionDeclaration, Type } from '@google/genai';
 import type { NodeType, CodeProposal, FinancialFreedomState } from '../types';
 
@@ -63,13 +62,18 @@ function getParentPath(path: string): string | null {
     return normalized.substring(0, lastSlash) + '/';
 }
 
+function camelToSnakeCase(str: string): string {
+    return str.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase();
+}
+
 
 // --- Key Management ---
 export function getStoredKey(key: string): string | null {
     if (typeof window === 'undefined') return null;
     
+    const envKey = camelToSnakeCase(key);
     // Vercel/Vite environment variables must be prefixed with VITE_
-    const envVarName = `VITE_LUMINOUS_${key.toUpperCase()}`;
+    const envVarName = `VITE_LUMINOUS_${envKey}`;
     // FIX: Property 'env' does not exist on type 'ImportMeta'. Cast to any to bypass TypeScript error in environments without Vite client types.
     const envVar = (import.meta as any).env[envVarName];
     if (envVar) {
@@ -77,7 +81,7 @@ export function getStoredKey(key: string): string | null {
     }
     
     // Fallback to localStorage for local development
-    const storageKey = `LUMINOUS_${key.toUpperCase()}`;
+    const storageKey = `LUMINOUS_${envKey}`;
     return window.localStorage.getItem(storageKey);
 }
 
@@ -444,7 +448,7 @@ async function searchGitHubIssues({ owner, repo, query, label, milestone, assign
 
 async function webSearch({ query }: { query: string }): Promise<any> {
     const requestArgs = { query };
-    const apiKey = getStoredKey('serp_api_key');
+    const apiKey = getStoredKey('serpApi');
     if (!apiKey) return { error: { message: "Web search API key (SerpApi) is not configured.", suggestion: "Please set it in the settings.", requestArgs } };
     const url = `https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${apiKey}`;
     try {
@@ -793,8 +797,8 @@ async function deleteFile({ path }: { path: string }): Promise<any> {
 
 async function redisGet({ key }: { key: string }): Promise<any> {
     const requestArgs = { key };
-    const url = getStoredKey('redis_url');
-    const token = getStoredKey('redis_token');
+    const url = getStoredKey('redisUrl');
+    const token = getStoredKey('redisToken');
     if (!url || !token) return { error: { message: "Redis configuration is missing.", suggestion: "Please set it in the settings.", requestArgs } };
     const fetchUrl = `${url}/get/${key}`;
     try {
@@ -820,8 +824,8 @@ async function redisGet({ key }: { key: string }): Promise<any> {
 
 async function redisSet({ key, value }: { key: string, value: string }): Promise<any> {
     const requestArgs = { key, value: value.length > 200 ? value.substring(0, 200) + '...' : value };
-    const url = getStoredKey('redis_url');
-    const token = getStoredKey('redis_token');
+    const url = getStoredKey('redisUrl');
+    const token = getStoredKey('redisToken');
     if (!url || !token) return { error: { message: "Redis configuration is missing.", suggestion: "Please set it in the settings.", requestArgs } };
     const fetchUrl = `${url}/set/${key}`;
     try {
@@ -858,7 +862,7 @@ async function getCurrentTime(): Promise<any> {
 }
 
 async function getPlatformInfo(): Promise<any> {
-    const persistence = (getStoredKey('redis_url') && getStoredKey('redis_token'))
+    const persistence = (getStoredKey('redisUrl') && getStoredKey('redisToken'))
         ? 'Enabled (Redis)'
         : 'Disabled (Local Session Only)';
     
