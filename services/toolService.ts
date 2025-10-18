@@ -119,7 +119,9 @@ export function getStoredKey(key: string): string | null {
     const envKey = camelToSnakeCase(key);
     // Vercel/Vite environment variables must be prefixed with VITE_
     const envVarName = `VITE_LUMINOUS_${envKey}`;
-    const envVar = (import.meta as any).env[envVarName];
+    // FIX: Cast import.meta to any to prevent TypeScript errors in environments
+    // where Vite client types are not implicitly available.
+    const envVar = (import.meta as any).env?.[envVarName];
     if (envVar) {
         return envVar;
     }

@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import type { Message, LuminousState, ThoughtCategory, RichFeedback } from '../types';
 

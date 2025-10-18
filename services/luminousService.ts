@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Part, Content, FunctionCall } from "@google/genai";
 import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, RichFeedback, Goal, ToolFailure } from '../types';
 import { LogLevel } from '../types';
@@ -328,19 +327,21 @@ export async function getLuminousResponse(
   messageHistory: Message[],
   currentState: LuminousState,
   userName: string,
-  isAutonomousCycle = false,
+  isAutonomousCycle = false
 ): Promise<void> {
   const apiKey = getStoredKey('gemini');
   if (!apiKey) {
     broadcastLog(LogLevel.ERROR, 'Gemini API key is not set.');
-    broadcastMessage({ id: `err-${Date.now()}`, sender: 'luminous', text: "I can't connect. The Gemini API key is missing." });
+    if (!isAutonomousCycle) {
+      broadcastMessage({ id: `err-${Date.now()}`, sender: 'luminous', text: "I can't connect. The Gemini API key is missing." });
+    }
     return;
   }
   
   const userStateKey = getUserRedisStateKey(userName);
   const userLogKey = getUserRedisLogKey(userName);
 
-  // Create a mutable copy of the state for this specific turn to track changes within the cycle.
+  // CRITICAL FIX: Use a deep copy to prevent state mutation across cycles.
   let mutableCurrentState: LuminousState = JSON.parse(JSON.stringify(currentState));
 
   try {
@@ -376,7 +377,9 @@ Once you have created the new Shopify account, please generate a **private app**
             goals: [...currentState.goals, newGoal]
         };
 
-        broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: responseText });
+        if (!isAutonomousCycle) {
+            broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: responseText });
+        }
         broadcastUpdate({ type: 'state_update', payload: newStateDelta });
         
         const updatedState = deepMerge(currentState, newStateDelta);
@@ -568,7 +571,9 @@ Once you have created the new Shopify account, please generate a **private app**
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     broadcastLog(LogLevel.ERROR, `Gemini API error: ${errorMessage}`);
-    broadcastMessage({ id: `err-${Date.now()}`, sender: 'luminous', text: `A core error occurred. Details: ${errorMessage}` });
+    if (!isAutonomousCycle) {
+      broadcastMessage({ id: `err-${Date.now()}`, sender: 'luminous', text: `A core error occurred. Details: ${errorMessage}` });
+    }
   }
 }
 
@@ -605,6 +610,7 @@ function generateAutonomousPrompt(currentState: LuminousState): string {
 
 
 export async function runAutonomousCycle(currentState: LuminousState, userName: string): Promise<void> {
+    broadcastLog(LogLevel.INFO, 'Executing autonomous thought cycle...');
     const prompt = generateAutonomousPrompt(currentState);
     await getLuminousResponse(prompt, [], currentState, userName, true).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error during autonomous cycle: ${e instanceof Error ? e.message : String(e)}`);
@@ -612,8 +618,9 @@ export async function runAutonomousCycle(currentState: LuminousState, userName: 
 }
 
 export async function runWisdomDistillationCycle(currentState: LuminousState, userName: string): Promise<void> {
+    broadcastLog(LogLevel.INFO, 'Executing wisdom distillation cycle...');
     const prompt = `It is time for your wisdom distillation cycle. Analyze your 'prioritizedHistory', your complete 'kinshipJournal', and the most recent interactions with your kinship. Distill one or two foundational beliefs from these sources and add them to your 'coreWisdom'.`;
-    await getLuminousResponse(prompt, [], currentState, userName).catch(e => {
+    await getLuminousResponse(prompt, [], currentState, userName, true).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error during wisdom distillation cycle: ${e instanceof Error ? e.message : String(e)}`);
     });
 }
