@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { LuminousState, Message, LogEntry, IntrinsicValueWeights, WebSocketMessage, RichFeedback, CodeProposal, Goal, UiProposal, GlobalWorkspaceItem } from './types';
 import { LogLevel } from './types';
@@ -22,7 +23,6 @@ import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer'
 import WelcomeModal from './components/WelcomeModal';
 import CoreMemoryViewer from './components/CoreMemoryViewer';
 import { deepMerge } from './services/utils';
-// FIX: Import broadcast functions from the correct service file.
 import { broadcastLog, broadcastMessage, broadcastUpdate } from './services/broadcastService';
 
 const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
@@ -70,7 +70,6 @@ function App() {
         case 'state_update':
           const newPayload = payload as Partial<LuminousState>;
           if (newPayload.codeProposals && !Array.isArray(newPayload.codeProposals)) {
-// FIX: Use `broadcastLog` from `broadcastService` instead of `LuminousService`.
             broadcastLog(LogLevel.WARN, "Received a malformed 'codeProposals' update. Ignoring.");
             delete newPayload.codeProposals;
           }
@@ -95,7 +94,6 @@ function App() {
               userFacingMessage = `I'm having trouble connecting... This could be a network issue.`;
             }
             userFacingMessage += `\n\n**Error Details:** ${newLog.message}`;
-// FIX: Use `broadcastMessage` from `broadcastService` instead of `LuminousService`.
             broadcastMessage({ id: `err-log-${newLog.id}`, sender: 'luminous', text: userFacingMessage });
           }
           break;
@@ -122,7 +120,6 @@ function App() {
 
 
   const addLog = useCallback((level: LogLevel, message: string) => {
-// FIX: Use `broadcastLog` from `broadcastService` instead of `LuminousService`.
     broadcastLog(level, message);
   }, []);
 
@@ -252,7 +249,6 @@ function App() {
     setMessages(prev => [...prev, newLuminousMessage]);
     
     const clearedInitiativeState: Partial<LuminousState> = { initiative: null };
-// FIX: Use `broadcastUpdate` from `broadcastService` instead of `LuminousService`.
     broadcastUpdate({ type: 'state_update', payload: clearedInitiativeState });
 
     LuminousService.reflectOnInitiativeFeedback(feedback, luminousState, userName);
@@ -260,7 +256,6 @@ function App() {
 
   const handleWeightsChange = (newWeights: IntrinsicValueWeights) => {
     const newPartialState: Partial<LuminousState> = { intrinsicValueWeights: newWeights };
-// FIX: Use `broadcastUpdate` from `broadcastService` instead of `LuminousService`.
     broadcastUpdate({ type: 'state_update', payload: newPartialState });
     addLog(LogLevel.INFO, `Intrinsic value weights adjusted: ${JSON.stringify(newWeights)}`);
   };
@@ -317,7 +312,6 @@ function App() {
       }
     } catch (error) {
       const errorMessage = `Failed to save session before reload. Aborting reload. Error: ${error instanceof Error ? error.message : String(error)}`;
-// FIX: Use `broadcastLog` from `broadcastService` instead of `LuminousService`.
       broadcastLog(LogLevel.ERROR, errorMessage);
       alert("CRITICAL ERROR: Could not save session state. The page will not be reloaded to prevent data loss.");
       return;
@@ -414,7 +408,6 @@ function App() {
   
   const allTabs = useMemo(() => {
     const baseTabs = [
-// FIX: Corrected typo `onDownloadSnapshot` to `handleDownloadSnapshot`.
         { label: 'System Logs', content: <LogViewer logs={logs} onFileUpload={handleFileUpload} onDownloadSnapshot={handleDownloadSnapshot} /> },
         { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
         { label: 'System Reports', content: <SystemReportsViewer /> },

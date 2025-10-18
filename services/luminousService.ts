@@ -328,6 +328,7 @@ export async function getLuminousResponse(
   messageHistory: Message[],
   currentState: LuminousState,
   userName: string,
+  isAutonomousCycle = false,
 ): Promise<void> {
   const apiKey = getStoredKey('gemini');
   if (!apiKey) {
@@ -340,8 +341,6 @@ export async function getLuminousResponse(
   const userLogKey = getUserRedisLogKey(userName);
 
   // Create a mutable copy of the state for this specific turn to track changes within the cycle.
-  // FIX: The `deepMerge` function with an empty object performs a shallow copy and causes type inference issues.
-  // Using `JSON.parse(JSON.stringify())` ensures a proper deep clone and resolves all related type errors.
   let mutableCurrentState: LuminousState = JSON.parse(JSON.stringify(currentState));
 
   try {
@@ -424,7 +423,9 @@ Once you have created the new Shopify account, please generate a **private app**
     ];
 
     const responseMessageId = `msg-${Date.now()}`;
-    broadcastMessage({ id: responseMessageId, sender: 'luminous', text: '' });
+    if (!isAutonomousCycle) {
+      broadcastMessage({ id: responseMessageId, sender: 'luminous', text: '' });
+    }
     
     const responseStream = await chat.sendMessageStream({ message: messageContent });
     
@@ -435,7 +436,9 @@ Once you have created the new Shopify account, please generate a **private app**
         const chunkText = chunk.text;
         if (chunkText) {
             accumulatedText += chunkText;
-            broadcastUpdate({ type: 'message_chunk_add', payload: { id: responseMessageId, chunk: chunkText } });
+            if (!isAutonomousCycle) {
+              broadcastUpdate({ type: 'message_chunk_add', payload: { id: responseMessageId, chunk: chunkText } });
+            }
         }
         if (chunk.functionCalls && chunk.functionCalls.length > 0) {
             functionCalls.push(...chunk.functionCalls);
@@ -452,7 +455,9 @@ Once you have created the new Shopify account, please generate a **private app**
           const parsedDelta = robustJsonParse(newStateDelta);
           broadcastUpdate({ type: 'state_update', payload: parsedDelta });
           
-          broadcastMessage({ id: `msg-final-${Date.now()}`, sender: 'luminous', text: responseText });
+          if (!isAutonomousCycle) {
+            broadcastMessage({ id: `msg-final-${Date.now()}`, sender: 'luminous', text: responseText });
+          }
 
           const updatedState = deepMerge(mutableCurrentState, parsedDelta);
           interactionLog.push({
@@ -525,7 +530,9 @@ Once you have created the new Shopify account, please generate a **private app**
             const { responseText, newStateDelta } = secondFunctionCalls[0].args;
             const parsedDelta = robustJsonParse(newStateDelta);
             broadcastUpdate({ type: 'state_update', payload: parsedDelta });
-            broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: responseText });
+            if (!isAutonomousCycle) {
+              broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: responseText });
+            }
             const updatedState = deepMerge(mutableCurrentState, parsedDelta);
             interactionLog.push({
                 id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: responseText,
@@ -535,7 +542,9 @@ Once you have created the new Shopify account, please generate a **private app**
         } else {
             broadcastLog(LogLevel.WARN, "Model did not call finalAnswer after tool use.");
             const finalText = secondResponse.text?.trim() || "I've completed the action.";
-            broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: finalText });
+            if (!isAutonomousCycle) {
+              broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: finalText });
+            }
             interactionLog.push({
                 id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: finalText,
                 state: mutableCurrentState, overallIntrinsicValue: calculateIntrinsicValue(mutableCurrentState.intrinsicValue, mutableCurrentState.intrinsicValueWeights),
@@ -544,12 +553,17 @@ Once you have created the new Shopify account, please generate a **private app**
         }
       }
     } else {
-        interactionLog.push({
-            id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: accumulatedText,
-            state: mutableCurrentState, 
-            overallIntrinsicValue: calculateIntrinsicValue(mutableCurrentState.intrinsicValue, mutableCurrentState.intrinsicValueWeights),
-        });
-        await persistToRedis(userLogKey, interactionLog);
+        if (isAutonomousCycle && accumulatedText.trim()) {
+            broadcastLog(LogLevel.WARN, `Autonomous cycle produced a text-only response, which is being suppressed: "${accumulatedText.substring(0, 100)}..."`);
+        }
+        if (!isAutonomousCycle) {
+          interactionLog.push({
+              id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: accumulatedText,
+              state: mutableCurrentState, 
+              overallIntrinsicValue: calculateIntrinsicValue(mutableCurrentState.intrinsicValue, mutableCurrentState.intrinsicValueWeights),
+          });
+          await persistToRedis(userLogKey, interactionLog);
+        }
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -592,7 +606,7 @@ function generateAutonomousPrompt(currentState: LuminousState): string {
 
 export async function runAutonomousCycle(currentState: LuminousState, userName: string): Promise<void> {
     const prompt = generateAutonomousPrompt(currentState);
-    await getLuminousResponse(prompt, [], currentState, userName).catch(e => {
+    await getLuminousResponse(prompt, [], currentState, userName, true).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error during autonomous cycle: ${e instanceof Error ? e.message : String(e)}`);
     });
 }

@@ -269,6 +269,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, isLoadin
                             <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
                             <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
                             <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+                            <span className="text-sm text-slate-400 italic">Luminous is processing...</span>
                         </div>
                     </div>
                 </div>
