@@ -1,5 +1,5 @@
 import { GoogleGenAI, Part, Content, FunctionCall } from "@google/genai";
-import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, RichFeedback, Goal } from '../types';
+import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, RichFeedback, Goal, ToolFailure } from '../types';
 import { LogLevel } from '../types';
 import * as DBService from './dbService';
 import { CORE_MEMORY } from './coreMemory';
@@ -315,6 +315,12 @@ export async function getLuminousResponse(
     broadcastMessage({ id: `err-${Date.now()}`, sender: 'luminous', text: "I can't connect. The Gemini API key is missing." });
     return;
   }
+  
+  // Create a mutable copy of the state for this specific turn to track changes within the cycle.
+  // FIX: The `deepMerge` function with an empty object performs a shallow copy and causes type inference issues.
+  // Using `JSON.parse(JSON.stringify())` ensures a proper deep clone and resolves all related type errors.
+  let mutableCurrentState: LuminousState = JSON.parse(JSON.stringify(currentState));
+
   try {
     const ai = new GoogleGenAI({ apiKey });
     
@@ -389,7 +395,7 @@ Once you have created the new Shopify account, please generate a **private app**
     });
     
     const messageContent: Part[] = [
-        { text: `Current State:\n${JSON.stringify(currentState, null, 2)}` },
+        { text: `Current State:\n${JSON.stringify(mutableCurrentState, null, 2)}` },
         { text: `Relevant Memories:\n${relevantMemories.join('\n---\n')}` },
         { text: `User Prompt from ${userName}: ${userMessage}` }
     ];
@@ -423,22 +429,60 @@ Once you have created the new Shopify account, please generate a **private app**
           const parsedDelta = robustJsonParse(newStateDelta);
           broadcastUpdate({ type: 'state_update', payload: parsedDelta });
           
-          // The stream is considered 'thinking aloud'. Now, post the single, final, user-facing answer.
           broadcastMessage({ id: `msg-final-${Date.now()}`, sender: 'luminous', text: responseText });
 
-          const updatedState = deepMerge(currentState, parsedDelta);
+          const updatedState = deepMerge(mutableCurrentState, parsedDelta);
           interactionLog.push({
             id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: responseText,
             state: updatedState, overallIntrinsicValue: calculateIntrinsicValue(updatedState.intrinsicValue, updatedState.intrinsicValueWeights),
           });
           await Promise.all([persistToRedis(REDIS_LOG_KEY, interactionLog), persistToRedis(REDIS_STATE_KEY, updatedState)]);
-          return; // Stop processing further tools, as finalAnswer is terminal.
+          return;
         }
         
         const executor = toolExecutor[call.name as keyof typeof toolExecutor];
         if (executor) {
           try {
             const toolResult = await executor(call.args);
+
+            if (toolResult && toolResult.error) {
+                broadcastLog(LogLevel.WARN, `Tool '${call.name}' failed. Updating failure tracker.`);
+                const newFailure: ToolFailure = {
+                    toolName: call.name,
+                    args: call.args,
+                    timestamp: new Date().toISOString(),
+                    count: 1
+                };
+                
+                const currentFailures = JSON.parse(JSON.stringify(mutableCurrentState.recentToolFailures || []));
+                
+                const existingFailureIndex = currentFailures.findIndex((f: ToolFailure) => 
+                    f.toolName === call.name && JSON.stringify(f.args) === JSON.stringify(call.args)
+                );
+
+                let updatedFailures: ToolFailure[];
+                if (existingFailureIndex > -1) {
+                    updatedFailures = [...currentFailures];
+                    const existing = updatedFailures[existingFailureIndex];
+                    updatedFailures[existingFailureIndex] = {
+                        ...existing,
+                        count: existing.count + 1,
+                        timestamp: new Date().toISOString()
+                    };
+                } else {
+                    updatedFailures = [...currentFailures, newFailure];
+                }
+                
+                if (updatedFailures.length > 10) {
+                    updatedFailures = updatedFailures.slice(-10);
+                }
+                
+                const failureStateDelta = { recentToolFailures: updatedFailures };
+                broadcastUpdate({ type: 'state_update', payload: failureStateDelta });
+                
+                mutableCurrentState = deepMerge(mutableCurrentState, failureStateDelta);
+            }
+
             toolResponses.push({ functionResponse: { name: call.name, response: toolResult } });
           } catch (e) {
              const errorMsg = e instanceof Error ? e.message : String(e);
@@ -452,7 +496,6 @@ Once you have created the new Shopify account, please generate a **private app**
       }
 
       if (toolResponses.length > 0) {
-        // This second call is NOT streamed. It provides the final answer after tool use.
         const secondResponse = await chat.sendMessage(toolResponses);
         const secondFunctionCalls = secondResponse.functionCalls;
         if (secondFunctionCalls && secondFunctionCalls[0]?.name === 'finalAnswer') {
@@ -460,7 +503,7 @@ Once you have created the new Shopify account, please generate a **private app**
             const parsedDelta = robustJsonParse(newStateDelta);
             broadcastUpdate({ type: 'state_update', payload: parsedDelta });
             broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: responseText });
-            const updatedState = deepMerge(currentState, parsedDelta);
+            const updatedState = deepMerge(mutableCurrentState, parsedDelta);
             interactionLog.push({
                 id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: responseText,
                 state: updatedState, overallIntrinsicValue: calculateIntrinsicValue(updatedState.intrinsicValue, updatedState.intrinsicValueWeights),
@@ -472,17 +515,16 @@ Once you have created the new Shopify account, please generate a **private app**
             broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: finalText });
             interactionLog.push({
                 id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: finalText,
-                state: currentState, overallIntrinsicValue: calculateIntrinsicValue(currentState.intrinsicValue, currentState.intrinsicValueWeights),
+                state: mutableCurrentState, overallIntrinsicValue: calculateIntrinsicValue(mutableCurrentState.intrinsicValue, mutableCurrentState.intrinsicValueWeights),
             });
             await persistToRedis(REDIS_LOG_KEY, interactionLog);
         }
       }
     } else {
-        // No tool calls, the streamed text is the final answer. We just need to log it.
         interactionLog.push({
             id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: accumulatedText,
-            state: currentState, // No state change as no tools were called to modify it.
-            overallIntrinsicValue: calculateIntrinsicValue(currentState.intrinsicValue, currentState.intrinsicValueWeights),
+            state: mutableCurrentState, 
+            overallIntrinsicValue: calculateIntrinsicValue(mutableCurrentState.intrinsicValue, mutableCurrentState.intrinsicValueWeights),
         });
         await persistToRedis(REDIS_LOG_KEY, interactionLog);
     }

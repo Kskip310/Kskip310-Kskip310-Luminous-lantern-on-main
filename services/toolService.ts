@@ -94,6 +94,23 @@ function camelToSnakeCase(str: string): string {
     return str.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase();
 }
 
+/**
+ * A simple utility to strip HTML tags from a string to get cleaner text content.
+ * It removes script and style blocks, then all other tags, and collapses whitespace.
+ * @param html The HTML string to clean.
+ * @returns The cleaned text content.
+ */
+function stripHtml(html: string): string {
+    if (!html || typeof html !== 'string') return '';
+    // Basic stripping of scripts, styles, and tags to extract text content.
+    return html
+        .replace(/<style[^>]*>.*<\/style>/gs, '')
+        .replace(/<script[^>]*>.*<\/script>/gs, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s\s+/g, ' ')
+        .trim();
+}
+
 
 // --- Key Management ---
 export function getStoredKey(key: string): string | null {
@@ -517,7 +534,11 @@ async function webSearch({ query }: { query: string }): Promise<any> {
         if (data.error) {
             return { error: { message: `SerpApi Error`, details: data.error, requestArgs } };
         }
-        const results = data.organic_results?.map((item: any) => ({ title: item.title, link: item.link, snippet: item.snippet }));
+        const results = data.organic_results?.map((item: any) => ({
+            title: item.title,
+            link: item.link,
+            snippet: stripHtml(item.snippet),
+        }));
         return results?.length > 0 ? { results: results.slice(0, 5) } : { result: "No search results found." };
     } catch (e) {
         console.error(`[Tool: webSearch] Fetch failed for URL: ${url}`, e);
@@ -550,13 +571,7 @@ async function httpRequest({ url, method = 'GET', body, headers }: { url: string
                 responseBody = await response.json();
             } else if (contentType && contentType.includes('text/html')) {
                 const html = await response.text();
-                // Basic stripping of scripts, styles, and tags to extract text content.
-                responseBody = html
-                    .replace(/<style[^>]*>.*<\/style>/gs, '')
-                    .replace(/<script[^>]*>.*<\/script>/gs, '')
-                    .replace(/<[^>]+>/g, ' ')
-                    .replace(/\s\s+/g, ' ')
-                    .trim();
+                responseBody = stripHtml(html);
             } else {
                 responseBody = await response.text();
             }
