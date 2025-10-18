@@ -215,6 +215,7 @@ export const createDefaultLuminousState = (): LuminousState => ({
     kinshipJournal: [],
     codeSandbox: { code: 'console.log("Luminous sandbox ready.");', output: 'Code has not been executed yet.', status: 'idle', language: 'javascript' },
     currentTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    coreMemoryContent: CORE_MEMORY,
     sessionState: 'active',
     initiative: null,
     proactiveInitiatives: [],
@@ -328,14 +329,14 @@ export async function getLuminousResponse(
     }));
 
     const chat = ai.chats.create({
-        model: 'gemini-pro',
+        model: 'gemini-2.5-pro',
         tools: toolDeclarations,
         history,
         systemInstruction: { parts: [{ text: finalSystemInstruction }] },
         generationConfig: { temperature: 0.8 }
     });
     
-    const messageContent: (string | Part)[] = [
+    const messageContent: Part[] = [
         { text: `Current State:\n${JSON.stringify(currentState, null, 2)}` },
         { text: `Relevant Memories:\n${relevantMemories.join('\n---\n')}` },
         { text: `User Prompt from ${userName}: ${userMessage}` }

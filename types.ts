@@ -198,6 +198,7 @@ export interface LuminousState {
   kinshipJournal: JournalEntry[];
   codeSandbox: CodeSandboxState;
   currentTimezone: string;
+  coreMemoryContent: string;
   // New properties for autonomy and session control
   sessionState: 'active' | 'paused';
   initiative: {

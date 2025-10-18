@@ -18,6 +18,7 @@ import UiProposalViewer from './components/UiProposalViewer';
 import FinancialFreedomViewer from './components/FinancialFreedomViewer';
 import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
 import WelcomeModal from './components/WelcomeModal';
+import CoreMemoryViewer from './components/CoreMemoryViewer';
 
 const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
 const SESSION_STATE_KEY = 'luminous_session_state'; // Single key for the shared session
@@ -380,6 +381,7 @@ function App() {
       { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
       { label: 'System Reports', content: <SystemReportsViewer /> },
       { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
+      { label: 'Core Memory', content: <CoreMemoryViewer content={luminousState.coreMemoryContent} /> },
       { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} /> },
       { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
       { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} /> },
