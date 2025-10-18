@@ -268,7 +268,7 @@ function App() {
 
   const handleSaveSettings = (keys: Record<string, string>) => {
     Object.entries(keys).forEach(([key, value]) => {
-        const storageKey = `LUMINOUS_${key.toUpperCase().replace(/([A-Z])/g, '_$1')}`;
+        const storageKey = `LUMINOUS_${key.toUpperCase()}`;
         if (value) window.localStorage.setItem(storageKey, value);
         else window.localStorage.removeItem(storageKey);
     });
