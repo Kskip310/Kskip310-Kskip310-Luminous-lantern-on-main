@@ -118,7 +118,7 @@ const initializeCoreMemory = (): string[] => {
 // --- Semantic Memory Retrieval ---
 async function getEmbedding(text: string, ai: GoogleGenAI): Promise<number[] | null> {
     try {
-        const result = await ai.embed.embedContent({
+        const result = await ai.models.embedContent({
             model: 'text-embedding-004',
             content: text,
         });
