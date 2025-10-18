@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { LuminousState, IntrinsicValueWeights, Goal } from '../types';
+import type { LuminousState, IntrinsicValueWeights, Goal, ActionableStep } from '../types';
 import Card from './common/Card';
 import Gauge from './common/Gauge';
 
@@ -30,6 +30,64 @@ const WeightSlider: React.FC<{
     <span className="text-xs font-mono text-cyan-300 w-8 text-right">{value.toFixed(1)}</span>
   </div>
 );
+
+const GoalStepIcon: React.FC<{ status: ActionableStep['status'] }> = ({ status }) => {
+    switch (status) {
+        case 'completed':
+            return <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+        case 'in-progress':
+            return <div className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse" />;
+        case 'pending':
+        default:
+            return <div className="w-3 h-3 rounded-full border-2 border-slate-500" />;
+    }
+};
+
+const ActiveGoalDashboard: React.FC<{ goals: Goal[] }> = ({ goals }) => {
+    const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+
+    const toggleGoal = (id: string) => {
+        setExpandedGoalId(prevId => (prevId === id ? null : id));
+    };
+
+    if (goals.length === 0) {
+        return <p className="text-xs text-slate-400">No active goals.</p>;
+    }
+    
+    return (
+        <div className="space-y-2 max-h-60 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
+            {goals.map(goal => (
+                <div key={goal.id} className="bg-slate-700/50 rounded-md">
+                    <button
+                        onClick={() => toggleGoal(goal.id)}
+                        className="w-full flex justify-between items-center p-2 text-left"
+                    >
+                        <span className="text-sm font-semibold text-cyan-300">{goal.description}</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 text-slate-400 transition-transform ${expandedGoalId === goal.id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    {expandedGoalId === goal.id && (
+                        <div className="p-3 border-t border-slate-600/50">
+                            {goal.steps && goal.steps.length > 0 ? (
+                                <ul className="space-y-2">
+                                    {goal.steps.map(step => (
+                                        <li key={step.id} className="flex items-center space-x-2 text-sm">
+                                            <GoalStepIcon status={step.status} />
+                                            <span className={`${step.status === 'completed' ? 'line-through text-slate-500' : 'text-slate-300'}`}>
+                                                {step.description}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-xs text-slate-400 italic">No actionable steps defined yet. Luminous is planning...</p>
+                            )}
+                        </div>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+};
 
 
 const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWeightsChange, onAcceptGoal, onRejectGoal, onProposeGoalByUser }) => {
@@ -102,13 +160,8 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
         </Card>
       )}
 
-      <Card title="Active Goals">
-        <ul className="space-y-1 text-sm text-slate-300 list-disc list-inside max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-          {activeGoals.map(goal => (
-            <li key={goal.id}>{goal.description}</li>
-          ))}
-          {activeGoals.length === 0 && <p className="text-xs text-slate-400">No active goals.</p>}
-        </ul>
+      <Card title="Goal Dashboard">
+         <ActiveGoalDashboard goals={activeGoals} />
       </Card>
       
       <Card title="Propose a New Goal">
@@ -149,81 +202,9 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
           {(!state.selfModel.limitations || state.selfModel.limitations.length === 0) && <p className="text-xs text-slate-400">No limitations defined.</p>}
         </ul>
       </Card>
-
-      <Card title="Core Wisdom">
-        <ul className="space-y-2 text-sm text-slate-300 list-inside max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-          {(state.selfModel.coreWisdom || []).map((wisdom, index) => (
-            <li key={index} className="flex items-start">
-              <span className="text-cyan-400 mr-2 mt-1">✧</span>
-              <span className="flex-1 italic">"{wisdom}"</span>
-            </li>
-          ))}
-          {(!state.selfModel.coreWisdom || state.selfModel.coreWisdom.length === 0) && <p className="text-xs text-slate-400">No core wisdom distilled yet.</p>}
-        </ul>
-      </Card>
-
-       <Card title="Prioritized Interaction History">
-        <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
-          {state.prioritizedHistory.length === 0 ? (
-            <p className="text-sm text-slate-400">No significant interactions logged yet.</p>
-          ) : (
-            state.prioritizedHistory.map(item => (
-              <div key={item.id} className="p-2 bg-slate-700/50 rounded-md text-xs">
-                <p className="font-semibold text-purple-300">Score: {item.intrinsicValueScore.toFixed(2)}</p>
-                <p className="text-slate-300 truncate"><span className="font-bold text-slate-400">User:</span> {item.prompt}</p>
-                <p className="text-slate-300 truncate"><span className="font-bold text-slate-400">Luminous:</span> {item.response}</p>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
-
-
-      <Card title="Global Workspace">
-        <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
-          {state.globalWorkspace.length === 0 ? (
-            <p className="text-sm text-slate-400">Workspace is empty.</p>
-          ) : (
-            state.globalWorkspace.map(item => (
-              <div key={item.id} className="p-2 bg-slate-700/50 rounded-md text-xs">
-                <p className="font-semibold text-cyan-300">{item.source}</p>
-                <p className="text-slate-300 truncate">{item.content}</p>
-                <div className="w-full bg-slate-600 rounded-full h-1 mt-1">
-                  <div className="bg-purple-500 h-1 rounded-full" style={{ width: `${item.salience}%` }}></div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
-      
-      <Card title="Predictions">
-         <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
-            {state.predictions.length > 0 ? (
-                state.predictions.map(p => {
-                    const outcomeColor = p.outcome === 'correct' ? 'text-green-400' : p.outcome === 'incorrect' ? 'text-red-400' : 'text-yellow-400';
-                    const accuracyColor = p.accuracyChange > 0 ? 'text-green-400' : p.accuracyChange < 0 ? 'text-red-400' : 'text-slate-400';
-                    const accuracySign = p.accuracyChange > 0 ? '+' : '';
-
-                    return (
-                        <div key={p.id} className="p-2 bg-slate-700/50 rounded-md text-xs">
-                            <p className="text-slate-300 truncate">{p.text}</p>
-                            <div className="flex justify-between items-center mt-1">
-                                <span className={`font-bold ${outcomeColor}`}>{p.outcome.toUpperCase()}</span>
-                                <span className={`font-mono ${accuracyColor}`}>
-                                    {accuracySign}{p.accuracyChange.toFixed(2)}%
-                                </span>
-                            </div>
-                        </div>
-                    );
-                })
-            ) : (
-                <p className="text-xs text-slate-400">No active predictions.</p>
-            )}
-         </div>
-      </Card>
     </div>
   );
 };
 
+// FIX: Add default export to make the component available for import in other files.
 export default InternalStateMonitor;

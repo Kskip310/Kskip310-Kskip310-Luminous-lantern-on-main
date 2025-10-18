@@ -120,10 +120,17 @@ export interface CodeProposal {
 
 export type ValueOntology = Record<string, number>;
 
+export interface ActionableStep {
+  id: string;
+  description: string;
+  status: 'pending' | 'in-progress' | 'completed';
+}
+
 export interface Goal {
   id: string;
   description: string;
   status: 'active' | 'proposed' | 'achieved' | 'rejected';
+  steps: ActionableStep[];
 }
 
 export interface RichFeedback {
