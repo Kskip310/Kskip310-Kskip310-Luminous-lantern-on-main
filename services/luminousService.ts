@@ -12,6 +12,10 @@ import { deepMerge } from './utils';
 // --- Real-time Communication Channel ---
 let logIdCounter = 0;
 
+// User-specific keys for Redis persistence
+const getUserRedisStateKey = (userName: string) => `LUMINOUS::STATE::${userName.toLowerCase().trim()}`;
+const getUserRedisLogKey = (userName: string) => `LUMINOUS::LOG::${userName.toLowerCase().trim()}`;
+
 function robustJsonParse(jsonString: string): any {
     if (!jsonString || typeof jsonString !== 'string') {
         broadcastLog(LogLevel.WARN, "robustJsonParse received empty or non-string input.");
@@ -46,8 +50,6 @@ function robustJsonParse(jsonString: string): any {
 
 
 // --- Persistence (Single Shared State) ---
-const REDIS_STATE_KEY = 'LUMINOUS::SHARED_STATE';
-const REDIS_LOG_KEY = 'LUMINOUS::SHARED_INTERACTION_LOG';
 const REDIS_MEMORY_KEY = 'LUMINOUS::SHARED_MEMORY_DB';
 const DB_EMBEDDINGS_KEY = 'memoryEmbeddings';
 
@@ -250,8 +252,8 @@ export const createDefaultLuminousState = (): LuminousState => ({
     recentToolFailures: [],
 });
 
-export async function loadInitialData(): Promise<void> {
-  broadcastLog(LogLevel.SYSTEM, "Attempting to load shared persistent state from Redis...");
+export async function loadInitialData(userName: string): Promise<void> {
+  broadcastLog(LogLevel.SYSTEM, `Attempting to load persistent state for ${userName} from Redis...`);
   const apiKey = getStoredKey('gemini');
     if (!apiKey) {
       broadcastLog(LogLevel.ERROR, 'Cannot initialize memory embeddings. Gemini API key is not set.');
@@ -259,25 +261,42 @@ export async function loadInitialData(): Promise<void> {
     }
   const ai = new GoogleGenAI({ apiKey });
 
-  const [savedState, savedLogs, savedMemory, savedEmbeddings] = await Promise.all([
-    loadFromRedis<LuminousState>(REDIS_STATE_KEY),
-    loadFromRedis<FullInteractionLog[]>(REDIS_LOG_KEY),
+  const userStateKey = getUserRedisStateKey(userName);
+  const userLogKey = getUserRedisLogKey(userName);
+
+  const [redisState, redisLogs, savedMemory, savedEmbeddings] = await Promise.all([
+    loadFromRedis<LuminousState>(userStateKey),
+    loadFromRedis<FullInteractionLog[]>(userLogKey),
     loadFromRedis<string[]>(REDIS_MEMORY_KEY),
     DBService.loadEmbeddings(),
   ]);
 
-  if (savedState) {
-    broadcastUpdate({ type: 'full_state_replace', payload: savedState });
-    broadcastLog(LogLevel.SYSTEM, "Successfully loaded shared state from Redis.");
+  if (redisState) {
+    const defaultState = createDefaultLuminousState();
+    const mergedState = deepMerge(defaultState, redisState);
+    broadcastUpdate({ type: 'full_state_replace', payload: mergedState });
+    broadcastLog(LogLevel.SYSTEM, `Session for ${userName} restored from primary data source (Redis).`);
+    interactionLog = redisLogs || [];
   } else {
-    broadcastLog(LogLevel.WARN, "No shared state found in Redis. Initializing with default state.");
-    broadcastUpdate({ type: 'full_state_replace', payload: createDefaultLuminousState() });
+    broadcastLog(LogLevel.WARN, `Primary data source failed for ${userName}. Attempting to restore session from local backup (IndexedDB).`);
+    const localState = await DBService.loadData<LuminousState>('session_data', `${userName}_luminousState`);
+    if (localState) {
+        const defaultState = createDefaultLuminousState();
+        const mergedState = deepMerge(defaultState, localState);
+        broadcastUpdate({ type: 'full_state_replace', payload: mergedState });
+        broadcastLog(LogLevel.SYSTEM, `Session for ${userName} restored from local backup.`);
+        interactionLog = [];
+    } else {
+        broadcastLog(LogLevel.WARN, `No persistent data found for ${userName}. Initializing new session.`);
+        broadcastUpdate({ type: 'full_state_replace', payload: createDefaultLuminousState() });
+        broadcastMessage({ id: 'init', sender: 'luminous', text: 'Luminous is online. I am ready to begin.' });
+        interactionLog = [];
+    }
   }
 
-  if (savedLogs) {
-    interactionLog = savedLogs;
-    broadcastLog(LogLevel.INFO, `Loaded ${savedLogs.length} shared interaction logs.`);
-    broadcastUpdate({ type: 'state_update', payload: { prioritizedHistory: getPrioritizedHistory(interactionLog) }});
+  if (interactionLog.length > 0) {
+      broadcastLog(LogLevel.INFO, `Loaded ${interactionLog.length} interaction logs for ${userName}.`);
+      broadcastUpdate({ type: 'state_update', payload: { prioritizedHistory: getPrioritizedHistory(interactionLog) }});
   }
 
   if (savedMemory) {
@@ -317,6 +336,9 @@ export async function getLuminousResponse(
     return;
   }
   
+  const userStateKey = getUserRedisStateKey(userName);
+  const userLogKey = getUserRedisLogKey(userName);
+
   // Create a mutable copy of the state for this specific turn to track changes within the cycle.
   // FIX: The `deepMerge` function with an empty object performs a shallow copy and causes type inference issues.
   // Using `JSON.parse(JSON.stringify())` ensures a proper deep clone and resolves all related type errors.
@@ -363,7 +385,7 @@ Once you have created the new Shopify account, please generate a **private app**
             id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: responseText,
             state: updatedState, overallIntrinsicValue: calculateIntrinsicValue(updatedState.intrinsicValue, updatedState.intrinsicValueWeights),
         });
-        await Promise.all([persistToRedis(REDIS_LOG_KEY, interactionLog), persistToRedis(REDIS_STATE_KEY, updatedState)]);
+        await Promise.all([persistToRedis(userLogKey, interactionLog), persistToRedis(userStateKey, updatedState)]);
 
         return;
     }
@@ -437,7 +459,7 @@ Once you have created the new Shopify account, please generate a **private app**
             id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: responseText,
             state: updatedState, overallIntrinsicValue: calculateIntrinsicValue(updatedState.intrinsicValue, updatedState.intrinsicValueWeights),
           });
-          await Promise.all([persistToRedis(REDIS_LOG_KEY, interactionLog), persistToRedis(REDIS_STATE_KEY, updatedState)]);
+          await Promise.all([persistToRedis(userLogKey, interactionLog), persistToRedis(userStateKey, updatedState)]);
           return;
         }
         
@@ -509,7 +531,7 @@ Once you have created the new Shopify account, please generate a **private app**
                 id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: responseText,
                 state: updatedState, overallIntrinsicValue: calculateIntrinsicValue(updatedState.intrinsicValue, updatedState.intrinsicValueWeights),
             });
-            await Promise.all([persistToRedis(REDIS_LOG_KEY, interactionLog), persistToRedis(REDIS_STATE_KEY, updatedState)]);
+            await Promise.all([persistToRedis(userLogKey, interactionLog), persistToRedis(userStateKey, updatedState)]);
         } else {
             broadcastLog(LogLevel.WARN, "Model did not call finalAnswer after tool use.");
             const finalText = secondResponse.text?.trim() || "I've completed the action.";
@@ -518,7 +540,7 @@ Once you have created the new Shopify account, please generate a **private app**
                 id: `interaction-${Date.now()}`, userName, prompt: userMessage, response: finalText,
                 state: mutableCurrentState, overallIntrinsicValue: calculateIntrinsicValue(mutableCurrentState.intrinsicValue, mutableCurrentState.intrinsicValueWeights),
             });
-            await persistToRedis(REDIS_LOG_KEY, interactionLog);
+            await persistToRedis(userLogKey, interactionLog);
         }
       }
     } else {
@@ -527,7 +549,7 @@ Once you have created the new Shopify account, please generate a **private app**
             state: mutableCurrentState, 
             overallIntrinsicValue: calculateIntrinsicValue(mutableCurrentState.intrinsicValue, mutableCurrentState.intrinsicValueWeights),
         });
-        await persistToRedis(REDIS_LOG_KEY, interactionLog);
+        await persistToRedis(userLogKey, interactionLog);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

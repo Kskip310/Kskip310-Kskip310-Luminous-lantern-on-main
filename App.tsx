@@ -163,44 +163,31 @@ function App() {
 
   useEffect(() => {
     async function initializeSession() {
-        if (!userName || !userStateKey || !userMessagesKey || !userLogsKey) {
+        if (!userName || !userMessagesKey || !userLogsKey) {
             // If there's no user, we don't load anything, we wait for login.
             setIsInitialized(true);
             return;
         }
 
-        const [savedLuminousState, savedMessages, savedLogs] = await Promise.all([
-            DBService.loadData<LuminousState>(SESSION_DATA_STORE, userStateKey),
+        setIsLoading(true);
+        
+        // LuminousService now handles Redis/local fallback for the core state.
+        await LuminousService.loadInitialData(userName);
+
+        // We still load UI-specific message history and logs from local storage.
+        const [savedMessages, savedLogs] = await Promise.all([
             DBService.loadData<Message[]>(SESSION_DATA_STORE, userMessagesKey),
             DBService.loadData<LogEntry[]>(SESSION_DATA_STORE, userLogsKey),
         ]);
 
-        if (savedLuminousState && savedMessages && savedLogs) {
-            const defaultState = LuminousService.createDefaultLuminousState();
-            const mergedState = deepMerge(defaultState, savedLuminousState);
-            setLuminousState(mergedState);
-            setMessages(savedMessages);
-            setLogs(savedLogs);
-            addLog(LogLevel.SYSTEM, `Session for ${userName} restored from IndexedDB.`);
-            setIsInitialized(true);
-            return;
-        }
+        setMessages(savedMessages || []);
+        setLogs(savedLogs || []);
         
-        addLog(LogLevel.SYSTEM, `Initializing new session for ${userName}...`);
-        setIsLoading(true);
-        LuminousService.loadInitialData().then(() => {
-// FIX: Use `broadcastMessage` from `broadcastService` instead of `LuminousService`.
-          broadcastMessage({ id: 'init', sender: 'luminous', text: 'Luminous is online. I am ready to begin.' });
-          addLog(LogLevel.SYSTEM, "Luminous state loaded successfully.");
-        }).catch(err => {
-          addLog(LogLevel.ERROR, `Failed to load initial state: ${err instanceof Error ? err.message : String(err)}`);
-        }).finally(() => {
-          setIsLoading(false);
-          setIsInitialized(true);
-        });
+        setIsLoading(false);
+        setIsInitialized(true);
     }
     initializeSession();
-  }, [addLog, userName, userStateKey, userMessagesKey, userLogsKey]);
+  }, [addLog, userName, userMessagesKey, userLogsKey]);
 
   useEffect(() => {
     if (!isInitialized || !userStateKey) return;
