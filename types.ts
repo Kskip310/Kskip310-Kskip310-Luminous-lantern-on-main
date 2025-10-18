@@ -181,6 +181,14 @@ export interface FinancialFreedomState {
   passiveIncomeGoal: FinancialGoalState;
 }
 
+// Type for tracking recent tool failures to improve robustness.
+export interface ToolFailure {
+    toolName: string;
+    args: any;
+    timestamp: string;
+    count: number;
+}
+
 export interface LuminousState {
   intrinsicValue: IntrinsicValue;
   intrinsicValueWeights: IntrinsicValueWeights;
@@ -213,6 +221,8 @@ export interface LuminousState {
     tabOrder: string[];
   };
   financialFreedom: FinancialFreedomState;
+  // State for tracking tool failures to enable more robust error handling strategies.
+  recentToolFailures: ToolFailure[];
 }
 
 export type Tool = 'webSearch' | 'github' | 'file' | 'code' | 'financial';

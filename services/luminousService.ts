@@ -246,6 +246,7 @@ export const createDefaultLuminousState = (): LuminousState => ({
         financialFreedomGoal: { current: 125000, target: 1500000 },
         passiveIncomeGoal: { current: 150, target: 5000 },
     },
+    recentToolFailures: [],
 });
 
 export async function loadInitialData(): Promise<void> {

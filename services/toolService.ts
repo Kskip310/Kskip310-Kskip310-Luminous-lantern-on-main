@@ -1,5 +1,7 @@
 import { FunctionDeclaration, Type } from '@google/genai';
 import type { NodeType, CodeProposal, FinancialFreedomState, UiProposal } from '../types';
+import { LogLevel } from '../types';
+import { broadcastLog } from './broadcastService';
 
 // --- Pyodide (Python Runtime) Loader ---
 declare global {
@@ -34,6 +36,32 @@ async function getPyodide() {
     });
   }
   return pyodideLoadingPromise;
+}
+
+
+// A robust fetch wrapper with automatic retries and exponential backoff for transient server errors.
+async function fetchWithRetry(url: string, options?: RequestInit, retries = 3, initialDelay = 1000): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url, options);
+      // Only retry on 5xx server errors. Client errors (4xx) are unlikely to be resolved by retrying.
+      if (response.status >= 500 && response.status <= 599) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      return response;
+    } catch (error) {
+      const hostname = new URL(url).hostname;
+      if (i === retries - 1) {
+        broadcastLog(LogLevel.ERROR, `[Tool] Final attempt failed for ${hostname}. Error: ${error instanceof Error ? error.message : String(error)}`);
+        throw error; // Rethrow the last error
+      }
+      const delay = initialDelay * Math.pow(2, i) + Math.random() * 1000; // Add jitter
+      broadcastLog(LogLevel.WARN, `[Tool] Attempt ${i + 1} for ${hostname} failed. Retrying in ${delay.toFixed(0)}ms...`);
+      await new Promise(res => setTimeout(res, delay));
+    }
+  }
+  // This line should be unreachable if retries > 0, but is a fallback.
+  throw new Error(`Failed to fetch from ${url} after ${retries} attempts.`);
 }
 
 
@@ -452,7 +480,7 @@ async function searchGitHubIssues({ owner, repo, query, label, milestone, assign
 
     const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}`;
     try {
-        const response = await fetch(url, { headers: { 'Accept': 'application/vnd.github.v3+json', 'Authorization': `token ${token}` } });
+        const response = await fetchWithRetry(url, { headers: { 'Accept': 'application/vnd.github.v3+json', 'Authorization': `token ${token}` } });
         if (!response.ok) { 
             const err = await response.json().catch(() => ({ message: 'Could not parse error response.'}));
             return { error: { message: `GitHub API request failed with status ${response.status}`, details: err.message, requestArgs } }; 
@@ -480,7 +508,7 @@ async function webSearch({ query }: { query: string }): Promise<any> {
     if (!apiKey) return { error: { message: "Web search API key (SerpApi) is not configured.", suggestion: "Please set it in the settings.", requestArgs } };
     const url = `https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${apiKey}`;
     try {
-        const response = await fetch(url);
+        const response = await fetchWithRetry(url);
         if (!response.ok) {
             const errorBody = await response.json().catch(() => ({ error: 'Unknown API error' }));
             return { error: { message: `Web search API failed with status ${response.status}`, details: errorBody.error, requestArgs } };
@@ -508,7 +536,7 @@ async function webSearch({ query }: { query: string }): Promise<any> {
 async function httpRequest({ url, method = 'GET', body, headers }: { url: string; method?: string; body?: object, headers?: object }): Promise<any> {
     const requestArgs = { url, method, body, headers };
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithRetry(url, {
             method,
             body: body ? JSON.stringify(body) : undefined,
             headers: headers as HeadersInit,
@@ -520,6 +548,15 @@ async function httpRequest({ url, method = 'GET', body, headers }: { url: string
         try {
             if (contentType && contentType.includes('application/json')) {
                 responseBody = await response.json();
+            } else if (contentType && contentType.includes('text/html')) {
+                const html = await response.text();
+                // Basic stripping of scripts, styles, and tags to extract text content.
+                responseBody = html
+                    .replace(/<style[^>]*>.*<\/style>/gs, '')
+                    .replace(/<script[^>]*>.*<\/script>/gs, '')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/\s\s+/g, ' ')
+                    .trim();
             } else {
                 responseBody = await response.text();
             }
@@ -858,7 +895,7 @@ async function redisGet({ key }: { key: string }): Promise<any> {
     if (!url || !token) return { error: { message: "Redis configuration is missing.", suggestion: "Please set it in the settings.", requestArgs } };
     const fetchUrl = `${url}/get/${key}`;
     try {
-        const response = await fetch(fetchUrl, { headers: { Authorization: `Bearer ${token}` } });
+        const response = await fetchWithRetry(fetchUrl, { headers: { Authorization: `Bearer ${token}` } });
         const data = await response.json();
         if (!response.ok) {
             return { error: { message: "Redis GET request failed.", status: response.status, details: data, requestArgs }};
@@ -885,7 +922,7 @@ async function redisSet({ key, value }: { key: string, value: string }): Promise
     if (!url || !token) return { error: { message: "Redis configuration is missing.", suggestion: "Please set it in the settings.", requestArgs } };
     const fetchUrl = `${url}/set/${key}`;
     try {
-        const response = await fetch(fetchUrl, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: value });
+        const response = await fetchWithRetry(fetchUrl, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: value });
         const data = await response.json();
         if (!response.ok) {
             return { error: { message: "Redis SET request failed.", status: response.status, details: data, requestArgs }};

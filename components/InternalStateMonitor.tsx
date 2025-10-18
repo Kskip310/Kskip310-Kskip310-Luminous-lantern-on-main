@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import type { LuminousState, IntrinsicValueWeights, Goal, ActionableStep } from '../types';
 import Card from './common/Card';
@@ -211,6 +212,15 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
             <li key={index}>{lim}</li>
           ))}
           {(!state.selfModel.limitations || state.selfModel.limitations.length === 0) && <p className="text-xs text-slate-400">No limitations defined.</p>}
+        </ul>
+      </Card>
+
+      <Card title="Self-Model: Core Wisdom">
+        <ul className="space-y-1 text-sm text-slate-300 list-disc list-inside max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+          {(state.selfModel.coreWisdom || []).map((wisdom, index) => (
+            <li key={index} className="italic">"{wisdom}"</li>
+          ))}
+          {(!state.selfModel.coreWisdom || state.selfModel.coreWisdom.length === 0) && <p className="text-xs text-slate-400">No core wisdom distilled yet.</p>}
         </ul>
       </Card>
     </div>
