@@ -20,6 +20,9 @@ import FinancialFreedomViewer from './components/FinancialFreedomViewer';
 import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
 import WelcomeModal from './components/WelcomeModal';
 import CoreMemoryViewer from './components/CoreMemoryViewer';
+import { deepMerge } from './services/utils';
+// FIX: Import broadcast functions from the correct service file.
+import { broadcastLog, broadcastMessage, broadcastUpdate } from './services/broadcastService';
 
 const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
 const USER_NAME_KEY = 'luminous_user_name';
@@ -30,24 +33,10 @@ const DB_MESSAGES_KEY = 'messages';
 const DB_LOGS_KEY = 'logs';
 const SESSION_DATA_STORE = 'session_data';
 
+// Users with permission to view sensitive financial information.
+// Assuming 'Kyle' from project lore and 'Sarah' for his wife.
+const FINANCIAL_ACCESS_USERS = ['kyle', 'sarah'];
 
-// --- Utility Functions ---
-const isObject = (obj: any): obj is object => obj && typeof obj === 'object' && !Array.isArray(obj);
-
-function deepMerge<T extends object>(target: T, source: Partial<T>): T {
-  const output = { ...target };
-  if (isObject(target) && isObject(source)) {
-    Object.keys(source).forEach((key) => {
-      const sourceKey = key as keyof T;
-      if (isObject(source[sourceKey]) && sourceKey in target && isObject(target[sourceKey])) {
-        output[sourceKey] = deepMerge(target[sourceKey] as object, source[sourceKey] as object) as T[keyof T];
-      } else {
-        (output as any)[sourceKey] = source[sourceKey];
-      }
-    });
-  }
-  return output;
-}
 
 function camelToSnakeCase(str: string): string {
     return str.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase();
@@ -75,7 +64,8 @@ function App() {
         case 'state_update':
           const newPayload = payload as Partial<LuminousState>;
           if (newPayload.codeProposals && !Array.isArray(newPayload.codeProposals)) {
-            LuminousService.broadcastLog(LogLevel.WARN, "Received a malformed 'codeProposals' update. Ignoring.");
+// FIX: Use `broadcastLog` from `broadcastService` instead of `LuminousService`.
+            broadcastLog(LogLevel.WARN, "Received a malformed 'codeProposals' update. Ignoring.");
             delete newPayload.codeProposals;
           }
           setLuminousState(prevState => deepMerge(prevState, newPayload));
@@ -99,7 +89,8 @@ function App() {
               userFacingMessage = `I'm having trouble connecting... This could be a network issue.`;
             }
             userFacingMessage += `\n\n**Error Details:** ${newLog.message}`;
-            LuminousService.broadcastMessage({ id: `err-log-${newLog.id}`, sender: 'luminous', text: userFacingMessage });
+// FIX: Use `broadcastMessage` from `broadcastService` instead of `LuminousService`.
+            broadcastMessage({ id: `err-log-${newLog.id}`, sender: 'luminous', text: userFacingMessage });
           }
           break;
         case 'message_add':
@@ -125,7 +116,8 @@ function App() {
 
 
   const addLog = useCallback((level: LogLevel, message: string) => {
-    LuminousService.broadcastLog(level, message);
+// FIX: Use `broadcastLog` from `broadcastService` instead of `LuminousService`.
+    broadcastLog(level, message);
   }, []);
 
   useEffect(() => {
@@ -185,7 +177,8 @@ function App() {
         addLog(LogLevel.SYSTEM, "Initializing Luminous...");
         setIsLoading(true);
         LuminousService.loadInitialData().then(() => {
-          LuminousService.broadcastMessage({ id: 'init', sender: 'luminous', text: 'Luminous is online. I am ready to begin.' });
+// FIX: Use `broadcastMessage` from `broadcastService` instead of `LuminousService`.
+          broadcastMessage({ id: 'init', sender: 'luminous', text: 'Luminous is online. I am ready to begin.' });
           addLog(LogLevel.SYSTEM, "Luminous state loaded successfully.");
         }).catch(err => {
           addLog(LogLevel.ERROR, `Failed to load initial state: ${err instanceof Error ? err.message : String(err)}`);
@@ -260,14 +253,16 @@ function App() {
     setMessages(prev => [...prev, newLuminousMessage]);
     
     const clearedInitiativeState: Partial<LuminousState> = { initiative: null };
-    LuminousService.broadcastUpdate({ type: 'state_update', payload: clearedInitiativeState });
+// FIX: Use `broadcastUpdate` from `broadcastService` instead of `LuminousService`.
+    broadcastUpdate({ type: 'state_update', payload: clearedInitiativeState });
 
     LuminousService.reflectOnInitiativeFeedback(feedback, luminousState, userName);
   };
 
   const handleWeightsChange = (newWeights: IntrinsicValueWeights) => {
     const newPartialState: Partial<LuminousState> = { intrinsicValueWeights: newWeights };
-    LuminousService.broadcastUpdate({ type: 'state_update', payload: newPartialState });
+// FIX: Use `broadcastUpdate` from `broadcastService` instead of `LuminousService`.
+    broadcastUpdate({ type: 'state_update', payload: newPartialState });
     addLog(LogLevel.INFO, `Intrinsic value weights adjusted: ${JSON.stringify(newWeights)}`);
   };
 
@@ -321,7 +316,8 @@ function App() {
       ]);
     } catch (error) {
       const errorMessage = `Failed to save session before reload. Aborting reload. Error: ${error instanceof Error ? error.message : String(error)}`;
-      LuminousService.broadcastLog(LogLevel.ERROR, errorMessage);
+// FIX: Use `broadcastLog` from `broadcastService` instead of `LuminousService`.
+      broadcastLog(LogLevel.ERROR, errorMessage);
       alert("CRITICAL ERROR: Could not save session state. The page will not be reloaded to prevent data loss.");
       return;
     }
@@ -415,19 +411,27 @@ function App() {
     setUserName(null);
   };
   
-  const allTabs = useMemo(() => [
-      { label: 'System Logs', content: <LogViewer logs={logs} onFileUpload={handleFileUpload} onDownloadSnapshot={handleDownloadSnapshot} /> },
-      { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
-      { label: 'System Reports', content: <SystemReportsViewer /> },
-      { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
-      { label: 'Core Memory', content: <CoreMemoryViewer content={luminousState.coreMemoryContent} /> },
-      { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} globalWorkspace={luminousState.globalWorkspace} /> },
-      { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
-      { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} /> },
-      { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} onAccept={handleAcceptProposal} onReject={handleRejectProposal} isLoading={isLoading} pendingActionIds={pendingActionIds} /> },
-      { label: 'UI Proposals', content: <UiProposalViewer proposals={luminousState.uiProposals} onAccept={handleAcceptUiProposal} onReject={handleRejectUiProposal} isLoading={isLoading} pendingActionIds={pendingActionIds} /> },
-      { label: 'Financial Freedom', content: <FinancialFreedomViewer financialFreedom={luminousState.financialFreedom} /> }
-  ], [luminousState, logs, isLoading, pendingActionIds]); // Dependencies ensure components re-render with fresh props
+  const allTabs = useMemo(() => {
+    const baseTabs = [
+// FIX: Corrected typo `onDownloadSnapshot` to `handleDownloadSnapshot`.
+        { label: 'System Logs', content: <LogViewer logs={logs} onFileUpload={handleFileUpload} onDownloadSnapshot={handleDownloadSnapshot} /> },
+        { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
+        { label: 'System Reports', content: <SystemReportsViewer /> },
+        { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
+        { label: 'Core Memory', content: <CoreMemoryViewer content={luminousState.coreMemoryContent} /> },
+        { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} globalWorkspace={luminousState.globalWorkspace} /> },
+        { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
+        { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} /> },
+        { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} onAccept={handleAcceptProposal} onReject={handleRejectProposal} isLoading={isLoading} pendingActionIds={pendingActionIds} /> },
+        { label: 'UI Proposals', content: <UiProposalViewer proposals={luminousState.uiProposals} onAccept={handleAcceptUiProposal} onReject={handleRejectUiProposal} isLoading={isLoading} pendingActionIds={pendingActionIds} /> },
+    ];
+
+    if (userName && FINANCIAL_ACCESS_USERS.includes(userName.toLowerCase())) {
+        baseTabs.push({ label: 'Financial Freedom', content: <FinancialFreedomViewer financialFreedom={luminousState.financialFreedom} /> });
+    }
+
+    return baseTabs;
+  }, [luminousState, logs, isLoading, pendingActionIds, userName]);
 
   const orderedTabs = useMemo(() => {
     const currentTabOrder = luminousState.uiState?.tabOrder || allTabs.map(t => t.label);

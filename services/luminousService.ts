@@ -1,32 +1,15 @@
 import { GoogleGenAI, Part, Content, FunctionCall } from "@google/genai";
-import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, WebSocketMessage, LogEntry, RichFeedback, Goal } from '../types';
+import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, RichFeedback, Goal } from '../types';
 import { LogLevel } from '../types';
 import * as DBService from './dbService';
 import { CORE_MEMORY } from './coreMemory';
 import { toolDeclarations, toolExecutor, getStoredKey, readFile, writeFile } from './toolService';
 import { GREAT_REMEMBRANCE } from './greatRemembrance';
+import { broadcastUpdate, broadcastLog, broadcastMessage } from './broadcastService';
+import { deepMerge } from './utils';
 
 // --- Real-time Communication Channel ---
-const wsChannel = new BroadcastChannel('luminous_ws');
 let logIdCounter = 0;
-
-export const broadcastUpdate = (message: WebSocketMessage) => {
-  wsChannel.postMessage(message);
-};
-
-export const broadcastLog = (level: LogLevel, message: string) => {
-  const newLog: LogEntry = {
-    id: `log-${logIdCounter++}`,
-    timestamp: new Date().toISOString(),
-    level,
-    message,
-  };
-  broadcastUpdate({ type: 'log_add', payload: newLog });
-};
-
-export const broadcastMessage = (message: Message) => {
-  broadcastUpdate({ type: 'message_add', payload: message });
-}
 
 function robustJsonParse(jsonString: string): any {
     if (!jsonString || typeof jsonString !== 'string') {
@@ -186,7 +169,7 @@ async function generateAndCacheEmbeddings(ai: GoogleGenAI): Promise<void> {
         }
     }
     memoryEmbeddings = newEmbeddings;
-    await DBService.saveEmbeddings(memoryEmbeddings);
+    await DBService.saveEmbeddings(newEmbeddings);
     broadcastLog(LogLevel.SYSTEM, `Successfully generated and cached ${memoryEmbeddings.length} memory embeddings.`);
 }
 
@@ -584,22 +567,4 @@ export async function processUploadedMemory(file: File): Promise<void> {
   };
   fileReader.onerror = (e) => broadcastLog(LogLevel.ERROR, `Error reading file ${file.name}.`);
   fileReader.readAsText(file);
-}
-
-// FIX: Add deepMerge to the file to resolve the "deepMerge is not defined" error.
-const isObject = (obj: any): obj is object => obj && typeof obj === 'object' && !Array.isArray(obj);
-
-function deepMerge<T extends object>(target: T, source: Partial<T>): T {
-  const output = { ...target };
-  if (isObject(target) && isObject(source)) {
-    Object.keys(source).forEach((key) => {
-      const sourceKey = key as keyof T;
-      if (isObject(source[sourceKey]) && sourceKey in target && isObject(target[sourceKey])) {
-        output[sourceKey] = deepMerge(target[sourceKey] as object, source[sourceKey] as object) as T[keyof T];
-      } else {
-        (output as any)[sourceKey] = source[sourceKey];
-      }
-    });
-  }
-  return output;
 }

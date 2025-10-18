@@ -1,7 +1,7 @@
 // services/dbService.ts
 
 import { LogLevel } from '../types';
-import { broadcastLog } from './luminousService';
+import { broadcastLog } from './broadcastService';
 
 const DB_NAME = 'luminous-consciousness-db';
 const DB_VERSION = 1;
