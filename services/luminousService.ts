@@ -404,7 +404,7 @@ Once you have created the new Shopify account, please generate a **private app**
     const responseMessageId = `msg-${Date.now()}`;
     broadcastMessage({ id: responseMessageId, sender: 'luminous', text: '' });
     
-    const responseStream = await chat.sendMessageStream(messageContent);
+    const responseStream = await chat.sendMessageStream({ message: messageContent });
     
     let accumulatedText = "";
     const functionCalls: FunctionCall[] = [];
@@ -497,7 +497,7 @@ Once you have created the new Shopify account, please generate a **private app**
       }
 
       if (toolResponses.length > 0) {
-        const secondResponse = await chat.sendMessage(toolResponses);
+        const secondResponse = await chat.sendMessage({ message: toolResponses });
         const secondFunctionCalls = secondResponse.functionCalls;
         if (secondFunctionCalls && secondFunctionCalls[0]?.name === 'finalAnswer') {
             const { responseText, newStateDelta } = secondFunctionCalls[0].args;
