@@ -9,6 +9,8 @@ interface InternalStateMonitorProps {
   onAcceptGoal: (goal: Goal) => void;
   onRejectGoal: (goal: Goal) => void;
   onProposeGoalByUser: (description: string) => void;
+  isLoading: boolean;
+  pendingActionIds: Set<string>;
 }
 
 const WeightSlider: React.FC<{
@@ -89,8 +91,12 @@ const ActiveGoalDashboard: React.FC<{ goals: Goal[] }> = ({ goals }) => {
     );
 };
 
+const Spinner: React.FC = () => (
+    <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
+);
 
-const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWeightsChange, onAcceptGoal, onRejectGoal, onProposeGoalByUser }) => {
+
+const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWeightsChange, onAcceptGoal, onRejectGoal, onProposeGoalByUser, isLoading, pendingActionIds }) => {
   const [userGoal, setUserGoal] = useState('');
   const statusColor = state.sessionState === 'active' ? 'text-green-400' : 'text-yellow-400';
   const statusText = state.sessionState === 'active' ? 'Active' : 'Paused for Integration';
@@ -147,15 +153,19 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
         <Card title="Goal Proposals">
           <div className="space-y-2">
             <p className="text-xs text-slate-400 italic mb-2">Luminous has proposed the following goals. Accept or reject them to guide its development.</p>
-            {proposedGoals.map(goal => (
-              <div key={goal.id} className="flex items-center justify-between p-2 bg-slate-700/50 rounded-md text-sm">
+            {proposedGoals.map(goal => {
+              const isPending = pendingActionIds.has(goal.id);
+              return (
+              <div key={goal.id} className={`flex items-center justify-between p-2 bg-slate-700/50 rounded-md text-sm transition-opacity ${isPending ? 'opacity-50' : ''}`}>
                 <span className="text-amber-300">{goal.description}</span>
-                <div className="flex space-x-2">
-                  <button onClick={() => onRejectGoal(goal)} className="p-1 text-red-400 hover:text-red-300" title="Reject">✖</button>
-                  <button onClick={() => onAcceptGoal(goal)} className="p-1 text-green-400 hover:text-green-300" title="Accept">✔</button>
+                <div className="flex items-center space-x-2">
+                  {isPending && <Spinner />}
+                  <button onClick={() => onRejectGoal(goal)} className="p-1 text-red-400 hover:text-red-300 disabled:text-slate-500 disabled:cursor-not-allowed" title="Reject" disabled={isPending || isLoading}>✖</button>
+                  <button onClick={() => onAcceptGoal(goal)} className="p-1 text-green-400 hover:text-green-300 disabled:text-slate-500 disabled:cursor-not-allowed" title="Accept" disabled={isPending || isLoading}>✔</button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       )}
@@ -172,12 +182,13 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
             value={userGoal}
             onChange={(e) => setUserGoal(e.target.value)}
             placeholder="e.g., Learn about quantum computing"
-            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:bg-slate-800"
             onKeyDown={(e) => { if (e.key === 'Enter') handlePropose(); }}
+            disabled={isLoading}
           />
           <button
             onClick={handlePropose}
-            disabled={!userGoal.trim()}
+            disabled={!userGoal.trim() || isLoading}
             className="px-3 py-2 text-sm font-semibold bg-cyan-600 text-white rounded-md hover:bg-cyan-500 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
           >
             Propose

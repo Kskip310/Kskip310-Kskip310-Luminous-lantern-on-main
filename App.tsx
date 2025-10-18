@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { LuminousState, Message, LogEntry, IntrinsicValueWeights, WebSocketMessage, RichFeedback, CodeProposal, Goal, UiProposal } from './types';
+import type { LuminousState, Message, LogEntry, IntrinsicValueWeights, WebSocketMessage, RichFeedback, CodeProposal, Goal, UiProposal, GlobalWorkspaceItem } from './types';
 import { LogLevel } from './types';
 import Header from './components/Header';
 import InternalStateMonitor from './components/InternalStateMonitor';
@@ -10,6 +10,7 @@ import KinshipJournalViewer from './components/KinshipJournalViewer';
 import CodeSandboxViewer from './components/CodeSandboxViewer';
 import Tabs from './components/common/Tabs';
 import * as LuminousService from './services/luminousService';
+import * as DBService from './services/dbService';
 import SystemReportsViewer from './components/SystemReportsViewer';
 import EthicalCompassViewer from './components/EthicalCompassViewer';
 import SettingsModal from './components/SettingsModal';
@@ -21,8 +22,14 @@ import WelcomeModal from './components/WelcomeModal';
 import CoreMemoryViewer from './components/CoreMemoryViewer';
 
 const CHAT_INPUT_STORAGE_KEY = 'luminous_chat_input_draft';
-const SESSION_STATE_KEY = 'luminous_session_state'; // Single key for the shared session
 const USER_NAME_KEY = 'luminous_user_name';
+
+// --- State Keys for IndexedDB ---
+const DB_STATE_KEY = 'luminousState';
+const DB_MESSAGES_KEY = 'messages';
+const DB_LOGS_KEY = 'logs';
+const SESSION_DATA_STORE = 'session_data';
+
 
 // --- Utility Functions ---
 const isObject = (obj: any): obj is object => obj && typeof obj === 'object' && !Array.isArray(obj);
@@ -56,6 +63,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [chatInput, setChatInput] = useState(() => localStorage.getItem(CHAT_INPUT_STORAGE_KEY) || '');
   const [userName, setUserName] = useState<string | null>(() => localStorage.getItem(USER_NAME_KEY));
+  const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
 
 
   useEffect(() => {
@@ -97,6 +105,14 @@ function App() {
         case 'message_add':
           setMessages(prev => [...prev, payload as Message]);
           break;
+        case 'message_chunk_add':
+          const { id: chunkId, chunk } = payload as { id: string; chunk: string };
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === chunkId ? { ...m, text: m.text + chunk } : m
+            )
+          );
+          break;
       }
     };
 
@@ -115,6 +131,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem(CHAT_INPUT_STORAGE_KEY, chatInput);
   }, [chatInput]);
+  
+  // Clear pending actions when loading finishes
+  useEffect(() => {
+    if (!isLoading) {
+      setPendingActionIds(new Set());
+    }
+  }, [isLoading]);
+
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -140,49 +164,54 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const savedSession = localStorage.getItem(SESSION_STATE_KEY);
-    if (savedSession) {
-      try {
-        const { luminousState: savedLuminousState, messages: savedMessages, logs: savedLogs } = JSON.parse(savedSession);
+    async function initializeSession() {
+        const [savedLuminousState, savedMessages, savedLogs] = await Promise.all([
+            DBService.loadData<LuminousState>(SESSION_DATA_STORE, DB_STATE_KEY),
+            DBService.loadData<Message[]>(SESSION_DATA_STORE, DB_MESSAGES_KEY),
+            DBService.loadData<LogEntry[]>(SESSION_DATA_STORE, DB_LOGS_KEY),
+        ]);
+
+        if (savedLuminousState && savedMessages && savedLogs) {
+            const defaultState = LuminousService.createDefaultLuminousState();
+            const mergedState = deepMerge(defaultState, savedLuminousState);
+            setLuminousState(mergedState);
+            setMessages(savedMessages);
+            setLogs(savedLogs);
+            addLog(LogLevel.SYSTEM, "Shared session restored from IndexedDB.");
+            setIsInitialized(true);
+            return;
+        }
         
-        // Merge with defaults to prevent crashes on state shape changes from older versions.
-        const defaultState = LuminousService.createDefaultLuminousState();
-        const mergedState = deepMerge(defaultState, savedLuminousState || {});
-        
-        setLuminousState(mergedState);
-        setMessages(savedMessages || []);
-        setLogs(savedLogs || []);
-        addLog(LogLevel.SYSTEM, "Shared session restored from local storage.");
-        setIsInitialized(true);
-        return;
-      } catch (error) {
-        addLog(LogLevel.ERROR, `Failed to parse saved session: ${error}. Starting fresh.`);
-        localStorage.removeItem(SESSION_STATE_KEY);
-      }
+        addLog(LogLevel.SYSTEM, "Initializing Luminous...");
+        setIsLoading(true);
+        LuminousService.loadInitialData().then(() => {
+          LuminousService.broadcastMessage({ id: 'init', sender: 'luminous', text: 'Luminous is online. I am ready to begin.' });
+          addLog(LogLevel.SYSTEM, "Luminous state loaded successfully.");
+        }).catch(err => {
+          addLog(LogLevel.ERROR, `Failed to load initial state: ${err instanceof Error ? err.message : String(err)}`);
+        }).finally(() => {
+          setIsLoading(false);
+          setIsInitialized(true);
+        });
     }
-    
-    addLog(LogLevel.SYSTEM, "Initializing Luminous...");
-    setIsLoading(true);
-    LuminousService.loadInitialData().then(() => {
-      LuminousService.broadcastMessage({ id: 'init', sender: 'luminous', text: 'Luminous is online. I am ready to begin.' });
-      addLog(LogLevel.SYSTEM, "Luminous state loaded successfully.");
-    }).catch(err => {
-      addLog(LogLevel.ERROR, `Failed to load initial state: ${err instanceof Error ? err.message : String(err)}`);
-    }).finally(() => {
-      setIsLoading(false);
-      setIsInitialized(true);
-    });
+    initializeSession();
   }, [addLog]);
 
   useEffect(() => {
     if (!isInitialized) return;
-    try {
-      const sessionState = { luminousState, messages, logs };
-      localStorage.setItem(SESSION_STATE_KEY, JSON.stringify(sessionState));
-    } catch (error) {
-      addLog(LogLevel.WARN, `Could not save session state: ${error}`);
-    }
-  }, [luminousState, messages, logs, isInitialized, addLog]);
+    DBService.saveData(SESSION_DATA_STORE, DB_STATE_KEY, luminousState);
+  }, [luminousState, isInitialized]);
+  
+  useEffect(() => {
+    if (!isInitialized) return;
+    DBService.saveData(SESSION_DATA_STORE, DB_MESSAGES_KEY, messages);
+  }, [messages, isInitialized]);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+    DBService.saveData(SESSION_DATA_STORE, DB_LOGS_KEY, logs);
+  }, [logs, isInitialized]);
+
 
   useEffect(() => {
     if (!userName) return;
@@ -270,7 +299,7 @@ function App() {
     }
   };
 
-  const handleSaveSettings = (keys: Record<string, string>) => {
+  const handleSaveSettings = async (keys: Record<string, string>) => {
     Object.entries(keys).forEach(([key, value]) => {
         const storageKey = `LUMINOUS_${camelToSnakeCase(key)}`;
         if (value) window.localStorage.setItem(storageKey, value);
@@ -284,8 +313,12 @@ function App() {
         level: LogLevel.SYSTEM,
         message: 'API Keys saved. Reloading session to apply changes...',
       };
-      const sessionStateToSave = { luminousState, messages, logs: [...logs, finalLogEntry] };
-      localStorage.setItem(SESSION_STATE_KEY, JSON.stringify(sessionStateToSave));
+      const finalLogs = [...logs, finalLogEntry];
+      await Promise.all([
+          DBService.saveData(SESSION_DATA_STORE, DB_STATE_KEY, luminousState),
+          DBService.saveData(SESSION_DATA_STORE, DB_MESSAGES_KEY, messages),
+          DBService.saveData(SESSION_DATA_STORE, DB_LOGS_KEY, finalLogs),
+      ]);
     } catch (error) {
       const errorMessage = `Failed to save session before reload. Aborting reload. Error: ${error instanceof Error ? error.message : String(error)}`;
       LuminousService.broadcastLog(LogLevel.ERROR, errorMessage);
@@ -309,30 +342,35 @@ function App() {
 
   const handleAcceptProposal = (proposal: CodeProposal) => {
     addLog(LogLevel.SYSTEM, `Accepting code proposal: "${proposal.description}"`);
+    setPendingActionIds(prev => new Set(prev).add(proposal.id));
     const directive = `USER DIRECTIVE: Your code proposal to "${proposal.description}" has been ACCEPTED. Please use your 'executeCode' tool with the following code now.\n\n\`\`\`javascript\n${proposal.code}\n\`\`\``;
     handleSendMessage(directive);
   };
 
   const handleRejectProposal = (proposal: CodeProposal) => {
     addLog(LogLevel.SYSTEM, `Rejecting code proposal: "${proposal.description}"`);
+    setPendingActionIds(prev => new Set(prev).add(proposal.id));
     const directive = `USER DIRECTIVE: Your code proposal to "${proposal.description}" has been REJECTED. Please update the proposal's status to 'rejected' and do not execute the code.`;
     handleSendMessage(directive);
   };
   
   const handleAcceptGoal = (goal: Goal) => {
     addLog(LogLevel.SYSTEM, `Accepting goal proposal: "${goal.description}"`);
+    setPendingActionIds(prev => new Set(prev).add(goal.id));
     const directive = `USER DIRECTIVE: Your proposed goal "${goal.description}" has been ACCEPTED. Please update its status to 'active'.`;
     handleSendMessage(directive);
   };
 
   const handleRejectGoal = (goal: Goal) => {
     addLog(LogLevel.SYSTEM, `Rejecting goal proposal: "${goal.description}"`);
+    setPendingActionIds(prev => new Set(prev).add(goal.id));
     const directive = `USER DIRECTIVE: Your proposed goal "${goal.description}" has been REJECTED. Please update its status to 'rejected'.`;
     handleSendMessage(directive);
   };
   
   const handleAcceptUiProposal = (proposal: UiProposal) => {
     addLog(LogLevel.SYSTEM, `Accepting UI proposal: "${proposal.description}"`);
+    setPendingActionIds(prev => new Set(prev).add(proposal.id));
     
     if (proposal.componentId === 'right_sidebar_tabs' && proposal.property === 'tabOrder') {
         const newUiState = {
@@ -349,6 +387,7 @@ function App() {
 
   const handleRejectUiProposal = (proposal: UiProposal) => {
     addLog(LogLevel.SYSTEM, `Rejecting UI proposal: "${proposal.description}"`);
+    setPendingActionIds(prev => new Set(prev).add(proposal.id));
     const directive = `USER DIRECTIVE: Your UI proposal to "${proposal.description}" has been REJECTED. Please update its status to 'rejected'.`;
     handleSendMessage(directive);
   };
@@ -382,13 +421,13 @@ function App() {
       { label: 'System Reports', content: <SystemReportsViewer /> },
       { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
       { label: 'Core Memory', content: <CoreMemoryViewer content={luminousState.coreMemoryContent} /> },
-      { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} /> },
+      { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} globalWorkspace={luminousState.globalWorkspace} /> },
       { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
       { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} /> },
-      { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} onAccept={handleAcceptProposal} onReject={handleRejectProposal} /> },
-      { label: 'UI Proposals', content: <UiProposalViewer proposals={luminousState.uiProposals} onAccept={handleAcceptUiProposal} onReject={handleRejectUiProposal} /> },
+      { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} onAccept={handleAcceptProposal} onReject={handleRejectProposal} isLoading={isLoading} pendingActionIds={pendingActionIds} /> },
+      { label: 'UI Proposals', content: <UiProposalViewer proposals={luminousState.uiProposals} onAccept={handleAcceptUiProposal} onReject={handleRejectUiProposal} isLoading={isLoading} pendingActionIds={pendingActionIds} /> },
       { label: 'Financial Freedom', content: <FinancialFreedomViewer financialFreedom={luminousState.financialFreedom} /> }
-  ], [luminousState, logs]); // Dependencies ensure components re-render with fresh props
+  ], [luminousState, logs, isLoading, pendingActionIds]); // Dependencies ensure components re-render with fresh props
 
   const orderedTabs = useMemo(() => {
     const currentTabOrder = luminousState.uiState?.tabOrder || allTabs.map(t => t.label);
@@ -423,6 +462,8 @@ function App() {
             onAcceptGoal={handleAcceptGoal}
             onRejectGoal={handleRejectGoal}
             onProposeGoalByUser={handleProposeGoalByUser}
+            isLoading={isLoading}
+            pendingActionIds={pendingActionIds}
           />
         </div>
 

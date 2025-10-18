@@ -222,4 +222,5 @@ export type WebSocketMessage =
   | { type: 'state_update'; payload: Partial<LuminousState> }
   | { type: 'full_state_replace'; payload: LuminousState }
   | { type: 'log_add'; payload: LogEntry }
-  | { type: 'message_add'; payload: Message };
+  | { type: 'message_add'; payload: Message }
+  | { type: 'message_chunk_add', payload: { id: string; chunk: string } };

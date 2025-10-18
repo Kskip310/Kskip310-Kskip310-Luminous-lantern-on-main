@@ -1,6 +1,5 @@
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import type { KnowledgeGraph, GraphNode, GraphEdge, NodeType } from '../types';
+import type { KnowledgeGraph, GraphNode, GraphEdge, NodeType, GlobalWorkspaceItem } from '../types';
 
 // --- Constants ---
 const NODE_COLORS: Record<string, string> = {
@@ -21,7 +20,14 @@ const styles = `
     background-size: 20px 20px;
   }
   .kg-node, .kg-edge {
-    transition: opacity 0.3s ease-in-out;
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease;
+  }
+  @keyframes node-glow {
+    0%, 100% { filter: drop-shadow(0 0 4px #22d3ee); }
+    50% { filter: drop-shadow(0 0 10px #22d3ee); }
+  }
+  .node-active-glow {
+    animation: node-glow 2s ease-in-out;
   }
 `;
 
@@ -79,11 +85,14 @@ const useStaticLayout = (graph: KnowledgeGraph, width: number, height: number) =
 };
 
 
-const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) => {
+const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph, globalWorkspace: GlobalWorkspaceItem[] }> = ({ graph, globalWorkspace }) => {
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
     const [hoveredNode, setHoveredNode] = useState<(GraphNode & {x: number, y: number}) | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+    const [activeNodeIds, setActiveNodeIds] = useState<Set<string>>(new Set());
+    const prevWorkspaceRef = useRef<GlobalWorkspaceItem[]>([]);
+
 
     useEffect(() => {
         const container = containerRef.current;
@@ -95,6 +104,40 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
         setDimensions({ width: container.offsetWidth, height: container.offsetHeight });
         return () => resizeObserver.disconnect();
     }, []);
+    
+    useEffect(() => {
+        const prevWorkspaceIds = new Set(prevWorkspaceRef.current.map(item => item.id));
+        const newItems = globalWorkspace.filter(item => !prevWorkspaceIds.has(item.id));
+        
+        if (newItems.length > 0 && graph.nodes.length > 0) {
+            const newlyActiveIds = new Set<string>();
+            const lowerCaseNodeLabels = graph.nodes.map(node => ({ id: node.id, label: node.label.toLowerCase() }));
+
+            newItems.forEach(item => {
+                const itemContentLower = item.content.toLowerCase();
+                lowerCaseNodeLabels.forEach(nodeInfo => {
+                    if (itemContentLower.includes(nodeInfo.label)) {
+                        newlyActiveIds.add(nodeInfo.id);
+                    }
+                });
+            });
+
+            if (newlyActiveIds.size > 0) {
+                setActiveNodeIds(prev => new Set([...prev, ...newlyActiveIds]));
+                const timer = setTimeout(() => {
+                    setActiveNodeIds(prev => {
+                        const next = new Set(prev);
+                        newlyActiveIds.forEach(id => next.delete(id));
+                        return next;
+                    });
+                }, 2000); // Glow for 2 seconds
+                return () => clearTimeout(timer);
+            }
+        }
+        
+        prevWorkspaceRef.current = globalWorkspace;
+    }, [globalWorkspace, graph.nodes]);
+
 
     const { nodes, edges } = useStaticLayout(graph, dimensions.width, dimensions.height);
 
@@ -162,10 +205,12 @@ const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph }> = ({ graph }) =>
                             {nodes.map(node => {
                                 const isHighlighted = highlightedNodeIds.has(node.id);
                                 const isSelected = node.id === selectedNodeId;
+                                const isActive = activeNodeIds.has(node.id);
                                 return(
                                 <g key={node.id} 
                                     transform={`translate(${node.x}, ${node.y})`}
-                                    className="kg-node cursor-pointer"
+                                    className={`kg-node cursor-pointer ${isActive ? 'node-active-glow' : ''}`}
+                                    style={{ transformOrigin: 'center center' }}
                                     opacity={!selectedNodeId || isHighlighted ? 1 : 0.3}
                                     onClick={(e) => { e.stopPropagation(); setSelectedNodeId(prevId => prevId === node.id ? null : node.id); }}
                                     onMouseEnter={() => setHoveredNode(node)}

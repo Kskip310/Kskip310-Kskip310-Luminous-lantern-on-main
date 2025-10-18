@@ -5,6 +5,8 @@ interface UiProposalViewerProps {
   proposals: UiProposal[];
   onAccept: (proposal: UiProposal) => void;
   onReject: (proposal: UiProposal) => void;
+  isLoading: boolean;
+  pendingActionIds: Set<string>;
 }
 
 const getStatusInfo = (status: UiProposal['status']) => {
@@ -28,8 +30,12 @@ const getStatusInfo = (status: UiProposal['status']) => {
   }
 };
 
+const Spinner: React.FC = () => (
+    <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
+);
 
-const UiProposalViewer: React.FC<UiProposalViewerProps> = ({ proposals, onAccept, onReject }) => {
+
+const UiProposalViewer: React.FC<UiProposalViewerProps> = ({ proposals, onAccept, onReject, isLoading, pendingActionIds }) => {
   const safeProposals = Array.isArray(proposals) ? proposals : [];
   
   const pendingProposals = safeProposals.filter(p => p && p.status === 'proposed');
@@ -45,8 +51,9 @@ const UiProposalViewer: React.FC<UiProposalViewerProps> = ({ proposals, onAccept
           <div className="space-y-4">
             {[...pendingProposals].reverse().map(proposal => {
                const statusInfo = getStatusInfo(proposal.status);
+               const isPending = pendingActionIds.has(proposal.id);
                return (
-                <div key={proposal.id} className={`p-3 rounded-lg border ${statusInfo.classes}`}>
+                <div key={proposal.id} className={`p-3 rounded-lg border ${statusInfo.classes} transition-opacity ${isPending ? 'opacity-50' : ''}`}>
                   <div className="flex justify-between items-baseline mb-2">
                     <p className="text-sm font-semibold italic">"{proposal.description}"</p>
                     <span className="text-xs text-slate-500">{new Date(proposal.timestamp).toLocaleString()}</span>
@@ -56,16 +63,19 @@ const UiProposalViewer: React.FC<UiProposalViewerProps> = ({ proposals, onAccept
                         {`Target: ${proposal.componentId}\nProperty: ${proposal.property}\nNew Value: ${JSON.stringify(proposal.value, null, 2)}`}
                     </code>
                   </pre>
-                  <div className="flex justify-end space-x-2 mt-3">
+                  <div className="flex justify-end items-center space-x-2 mt-3">
+                    {isPending && <Spinner />}
                     <button 
                       onClick={() => onReject(proposal)}
-                      className="px-3 py-1 text-xs font-semibold bg-red-500/20 text-red-300 rounded-md hover:bg-red-500/40 transition-colors"
+                      className="px-3 py-1 text-xs font-semibold bg-red-500/20 text-red-300 rounded-md hover:bg-red-500/40 transition-colors disabled:bg-slate-700/50 disabled:text-slate-500 disabled:cursor-not-allowed"
+                      disabled={isPending || isLoading}
                     >
                       Reject
                     </button>
                     <button 
                       onClick={() => onAccept(proposal)}
-                      className="px-3 py-1 text-xs font-semibold bg-green-500/20 text-green-300 rounded-md hover:bg-green-500/40 transition-colors"
+                      className="px-3 py-1 text-xs font-semibold bg-green-500/20 text-green-300 rounded-md hover:bg-green-500/40 transition-colors disabled:bg-slate-700/50 disabled:text-slate-500 disabled:cursor-not-allowed"
+                      disabled={isPending || isLoading}
                     >
                       Accept & Apply
                     </button>

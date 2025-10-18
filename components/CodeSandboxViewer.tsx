@@ -8,6 +8,10 @@ declare global {
   }
 }
 
+// Module-level variable to track installed packages across component remounts.
+const pyodideInstalledPackages = new Set<string>();
+
+
 const getStatusColor = (status: CodeSandboxState['status']) => {
   switch (status) {
     case 'success':
@@ -51,7 +55,6 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
   const [selectedLanguage, setSelectedLanguage] = useState<'javascript' | 'python'>('javascript');
   
   const pyodideRef = useRef<any>(null);
-  const installedPackages = useRef(new Set<string>());
   const [pyodideStatus, setPyodideStatus] = useState<'unloaded' | 'loading' | 'ready' | 'error'>('unloaded');
 
   useEffect(() => {
@@ -139,7 +142,7 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
           }
 
           const requiredPackages = [...detectedModules];
-          const packagesToInstall = requiredPackages.filter(p => !installedPackages.current.has(p));
+          const packagesToInstall = requiredPackages.filter(p => !pyodideInstalledPackages.has(p));
 
           if (packagesToInstall.length > 0) {
               const confirmed = window.confirm(
@@ -153,7 +156,7 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
 
               setUserOutput({ output: `Installing detected packages: ${packagesToInstall.join(', ')}...`, status: 'idle' });
               await py.loadPackage(packagesToInstall);
-              packagesToInstall.forEach(p => installedPackages.current.add(p));
+              packagesToInstall.forEach(p => pyodideInstalledPackages.add(p));
               executionLog += `Packages installed successfully: ${packagesToInstall.join(', ')}\n\n`;
           }
           // --- End of Package Logic ---
