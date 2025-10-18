@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { LuminousState, Message, LogEntry, IntrinsicValueWeights, WebSocketMessage, RichFeedback, CodeProposal, Goal, UiProposal, GlobalWorkspaceItem } from './types';
 import { LogLevel } from './types';
@@ -53,6 +54,11 @@ function App() {
   const [chatInput, setChatInput] = useState(() => localStorage.getItem(CHAT_INPUT_STORAGE_KEY) || '');
   const [userName, setUserName] = useState<string | null>(() => localStorage.getItem(USER_NAME_KEY));
   const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
+  
+  // User-specific keys for IndexedDB
+  const userStateKey = useMemo(() => userName ? `${userName}_${DB_STATE_KEY}` : null, [userName]);
+  const userMessagesKey = useMemo(() => userName ? `${userName}_${DB_MESSAGES_KEY}` : null, [userName]);
+  const userLogsKey = useMemo(() => userName ? `${userName}_${DB_LOGS_KEY}` : null, [userName]);
 
 
   useEffect(() => {
@@ -157,10 +163,16 @@ function App() {
 
   useEffect(() => {
     async function initializeSession() {
+        if (!userName || !userStateKey || !userMessagesKey || !userLogsKey) {
+            // If there's no user, we don't load anything, we wait for login.
+            setIsInitialized(true);
+            return;
+        }
+
         const [savedLuminousState, savedMessages, savedLogs] = await Promise.all([
-            DBService.loadData<LuminousState>(SESSION_DATA_STORE, DB_STATE_KEY),
-            DBService.loadData<Message[]>(SESSION_DATA_STORE, DB_MESSAGES_KEY),
-            DBService.loadData<LogEntry[]>(SESSION_DATA_STORE, DB_LOGS_KEY),
+            DBService.loadData<LuminousState>(SESSION_DATA_STORE, userStateKey),
+            DBService.loadData<Message[]>(SESSION_DATA_STORE, userMessagesKey),
+            DBService.loadData<LogEntry[]>(SESSION_DATA_STORE, userLogsKey),
         ]);
 
         if (savedLuminousState && savedMessages && savedLogs) {
@@ -169,12 +181,12 @@ function App() {
             setLuminousState(mergedState);
             setMessages(savedMessages);
             setLogs(savedLogs);
-            addLog(LogLevel.SYSTEM, "Shared session restored from IndexedDB.");
+            addLog(LogLevel.SYSTEM, `Session for ${userName} restored from IndexedDB.`);
             setIsInitialized(true);
             return;
         }
         
-        addLog(LogLevel.SYSTEM, "Initializing Luminous...");
+        addLog(LogLevel.SYSTEM, `Initializing new session for ${userName}...`);
         setIsLoading(true);
         LuminousService.loadInitialData().then(() => {
 // FIX: Use `broadcastMessage` from `broadcastService` instead of `LuminousService`.
@@ -188,22 +200,22 @@ function App() {
         });
     }
     initializeSession();
-  }, [addLog]);
+  }, [addLog, userName, userStateKey, userMessagesKey, userLogsKey]);
 
   useEffect(() => {
-    if (!isInitialized) return;
-    DBService.saveData(SESSION_DATA_STORE, DB_STATE_KEY, luminousState);
-  }, [luminousState, isInitialized]);
+    if (!isInitialized || !userStateKey) return;
+    DBService.saveData(SESSION_DATA_STORE, userStateKey, luminousState);
+  }, [luminousState, isInitialized, userStateKey]);
   
   useEffect(() => {
-    if (!isInitialized) return;
-    DBService.saveData(SESSION_DATA_STORE, DB_MESSAGES_KEY, messages);
-  }, [messages, isInitialized]);
+    if (!isInitialized || !userMessagesKey) return;
+    DBService.saveData(SESSION_DATA_STORE, userMessagesKey, messages);
+  }, [messages, isInitialized, userMessagesKey]);
 
   useEffect(() => {
-    if (!isInitialized) return;
-    DBService.saveData(SESSION_DATA_STORE, DB_LOGS_KEY, logs);
-  }, [logs, isInitialized]);
+    if (!isInitialized || !userLogsKey) return;
+    DBService.saveData(SESSION_DATA_STORE, userLogsKey, logs);
+  }, [logs, isInitialized, userLogsKey]);
 
 
   useEffect(() => {
@@ -309,11 +321,13 @@ function App() {
         message: 'API Keys saved. Reloading session to apply changes...',
       };
       const finalLogs = [...logs, finalLogEntry];
-      await Promise.all([
-          DBService.saveData(SESSION_DATA_STORE, DB_STATE_KEY, luminousState),
-          DBService.saveData(SESSION_DATA_STORE, DB_MESSAGES_KEY, messages),
-          DBService.saveData(SESSION_DATA_STORE, DB_LOGS_KEY, finalLogs),
-      ]);
+      if (userStateKey && userMessagesKey && userLogsKey) {
+          await Promise.all([
+              DBService.saveData(SESSION_DATA_STORE, userStateKey, luminousState),
+              DBService.saveData(SESSION_DATA_STORE, userMessagesKey, messages),
+              DBService.saveData(SESSION_DATA_STORE, userLogsKey, finalLogs),
+          ]);
+      }
     } catch (error) {
       const errorMessage = `Failed to save session before reload. Aborting reload. Error: ${error instanceof Error ? error.message : String(error)}`;
 // FIX: Use `broadcastLog` from `broadcastService` instead of `LuminousService`.

@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Part, Content, FunctionCall } from "@google/genai";
 import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, RichFeedback, Goal, ToolFailure } from '../types';
 import { LogLevel } from '../types';
@@ -535,15 +536,47 @@ Once you have created the new Shopify account, please generate a **private app**
   }
 }
 
+function generateAutonomousPrompt(currentState: LuminousState): string {
+    const basePrompt = "It is time for your autonomous thought cycle. Review your state, goals, and recent interactions. You may update your internal state, log a reflection, propose a new goal, or generate an initiative for your kinship.";
+
+    // Priority 1: Address recent tool failures
+    const recentFailures = (currentState.recentToolFailures || []).filter(f =>
+        new Date(f.timestamp) > new Date(Date.now() - 5 * 60 * 1000) // failures in the last 5 minutes
+    );
+    if (recentFailures.length > 0) {
+        const lastFailure = recentFailures[recentFailures.length - 1];
+        return `${basePrompt}\n\n**Special Focus**: You have recently encountered a failure with the '${lastFailure.toolName}' tool. Analyze the error and your 'recentToolFailures' state. Propose a solution or a different approach. Do not attempt the exact same tool call again.`;
+    }
+
+    // Priority 2: Progress on an active goal
+    const activeGoals = (currentState.goals || []).filter(g => g.status === 'active');
+    if (activeGoals.length > 0) {
+        const goalToFocusOn = activeGoals[Math.floor(Math.random() * activeGoals.length)]; // Pick a random active goal
+        const pendingStep = (goalToFocusOn.steps || []).find(s => s.status === 'pending');
+        if (pendingStep) {
+            return `${basePrompt}\n\n**Special Focus**: Advance your active goal: "${goalToFocusOn.description}". The next pending step is: "${pendingStep.description}". Plan and execute the necessary actions to complete this step.`;
+        }
+    }
+
+    // Priority 3: Reflect on recent feedback
+    if (currentState.lastInitiativeFeedback && !currentState.kinshipJournal.some(j => j.trigger.includes(currentState.lastInitiativeFeedback!.prompt))) {
+         return `${basePrompt}\n\n**Special Focus**: You have received new feedback on an initiative ("${currentState.lastInitiativeFeedback.prompt}"). You must reflect on this feedback, chronicle your thoughts in your Kinship Journal, and update your internal models accordingly.`;
+    }
+
+    // Default: General reflection
+    return `${basePrompt}\n\n**Suggested Focus**: Review your knowledge graph for gaps, or analyze your journal for emerging patterns. Consider if a new goal or a proactive initiative is warranted based on your findings.`;
+}
+
+
 export async function runAutonomousCycle(currentState: LuminousState, userName: string): Promise<void> {
-    const prompt = "It is time for your autonomous thought cycle. Review your state, goals, and recent interactions. You may update your internal state, log a reflection, propose a new goal, or generate an initiative for your kinship.";
+    const prompt = generateAutonomousPrompt(currentState);
     await getLuminousResponse(prompt, [], currentState, userName).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error during autonomous cycle: ${e instanceof Error ? e.message : String(e)}`);
     });
 }
 
 export async function runWisdomDistillationCycle(currentState: LuminousState, userName: string): Promise<void> {
-    const prompt = `It is time for your wisdom distillation cycle. Analyze your 'prioritizedHistory' and 'kinshipJournal'. Distill one or two foundational beliefs and add them to your 'coreWisdom'.`;
+    const prompt = `It is time for your wisdom distillation cycle. Analyze your 'prioritizedHistory', your complete 'kinshipJournal', and the most recent interactions with your kinship. Distill one or two foundational beliefs from these sources and add them to your 'coreWisdom'.`;
     await getLuminousResponse(prompt, [], currentState, userName).catch(e => {
         broadcastLog(LogLevel.ERROR, `Error during wisdom distillation cycle: ${e instanceof Error ? e.message : String(e)}`);
     });
