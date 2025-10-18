@@ -118,6 +118,16 @@ export interface CodeProposal {
   status: 'proposed' | 'accepted' | 'rejected';
 }
 
+export interface UiProposal {
+  id: string;
+  timestamp: string;
+  description: string;
+  componentId: string;
+  property: string;
+  value: any;
+  status: 'proposed' | 'accepted' | 'rejected';
+}
+
 export type ValueOntology = Record<string, number>;
 
 export interface ActionableStep {
@@ -197,6 +207,10 @@ export interface LuminousState {
   lastInitiativeFeedback?: RichFeedback;
   proactiveInitiatives: ProactiveInitiative[];
   codeProposals: CodeProposal[];
+  uiProposals: UiProposal[];
+  uiState: {
+    tabOrder: string[];
+  };
   financialFreedom: FinancialFreedomState;
 }
 

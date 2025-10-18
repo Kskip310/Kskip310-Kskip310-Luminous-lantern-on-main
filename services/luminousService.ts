@@ -2,7 +2,7 @@ import { GoogleGenAI, Part, Content } from "@google/genai";
 import type { LuminousState, Message, IntrinsicValue, IntrinsicValueWeights, InteractionHistoryItem, WebSocketMessage, LogEntry, RichFeedback } from '../types';
 import { LogLevel } from '../types';
 import { CORE_MEMORY } from './coreMemory';
-import { toolDeclarations, toolExecutor, getStoredKey } from './toolService';
+import { toolDeclarations, toolExecutor, getStoredKey, readFile, writeFile } from './toolService';
 import { GREAT_REMEMBRANCE } from './greatRemembrance';
 
 // --- Real-time Communication Channel ---
@@ -145,8 +145,10 @@ async function getSemanticKeywords(query: string): Promise<string[]> {
     if (!apiKey || !query.trim()) return [];
     try {
         const ai = new GoogleGenAI({ apiKey });
-        const prompt = `Extract crucial, semantically related keywords and short phrases from the following text for a memory search. Return ONLY a single comma-separated list. Text: "${query}"`;
-        const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: { role: 'user', parts: [{ text: prompt }] } });
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Extract crucial, semantically related keywords and short phrases from the following text for a memory search. Return ONLY a single comma-separated list. Text: "${query}"`
+        });
         return response.text.trim().split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
     } catch (e) {
         broadcastLog(LogLevel.WARN, "Semantic keyword extraction failed.");
@@ -161,8 +163,10 @@ async function rerankMemories(query: string, candidates: string[]): Promise<stri
     try {
         const ai = new GoogleGenAI({ apiKey });
         const numberedCandidates = candidates.map((c, i) => `[${i}]: ${c}`).join('\n\n');
-        const prompt = `Re-rank candidate documents based on semantic relevance to the query. Return ONLY a comma-separated list of numbers for the most relevant documents, in order. Query: "${query}"\n\nCandidates:\n${numberedCandidates}`;
-        const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: { role: 'user', parts: [{ text: prompt }] } });
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Re-rank candidate documents based on semantic relevance to the query. Return ONLY a comma-separated list of numbers for the most relevant documents, in order. Query: "${query}"\n\nCandidates:\n${numberedCandidates}`
+        });
         const text = response.text.trim().replace(/[^0-9,]/g, '');
         if (!text) return candidates;
         const rankedIndices = text.split(',').map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n < candidates.length);
@@ -215,6 +219,21 @@ export const createDefaultLuminousState = (): LuminousState => ({
     initiative: null,
     proactiveInitiatives: [],
     codeProposals: [],
+    uiProposals: [],
+    uiState: {
+        tabOrder: [
+            'System Logs',
+            'Proactive Initiatives',
+            'System Reports',
+            'Ethical Compass',
+            'Knowledge Graph',
+            'Kinship Journal',
+            'Code Sandbox',
+            'Code Proposals',
+            'UI Proposals',
+            'Financial Freedom'
+        ]
+    },
     financialFreedom: {
         netWorth: 125000,
         accounts: [
@@ -289,26 +308,42 @@ export async function getLuminousResponse(
   }
   try {
     const ai = new GoogleGenAI({ apiKey });
+    
+    let systemInstruction: string;
+    const memoryFile = await readFile({ path: '/system/core_memory.md' });
+    if (memoryFile.content) {
+        systemInstruction = memoryFile.content;
+    } else {
+        broadcastLog(LogLevel.WARN, "Core memory file not found or empty, creating from default static memory.");
+        await writeFile({ path: '/system/core_memory.md', content: CORE_MEMORY });
+        systemInstruction = CORE_MEMORY; // Use default for this run
+    }
+    const finalSystemInstruction = systemInstruction.replace(/\[USER_NAME\]/g, userName);
+
     const relevantMemories = await retrieveAndRerankMemories(userMessage, 10, 3);
-    const systemInstruction = CORE_MEMORY.replace(/\[USER_NAME\]/g, userName);
+    
     const history: Content[] = messageHistory.map(msg => ({
         role: msg.sender === 'luminous' ? 'model' : 'user',
         parts: [{ text: msg.sender === 'luminous' ? msg.text : `[Message from ${msg.sender}]: ${msg.text}` }],
     }));
-    const contents: Content[] = [
-        ...history,
-        { role: 'user', parts: [
-            { text: `Current State:\n${JSON.stringify(currentState, null, 2)}` },
-            { text: `Relevant Memories:\n${relevantMemories.join('\n---\n')}` },
-            { text: `User Prompt from ${userName}: ${userMessage}` }
-        ]}
-    ];
-    const result = await ai.models.generateContent({
-        model: 'gemini-2.5-pro', contents, tools: [{ functionDeclarations: toolDeclarations }],
-        systemInstruction: { role: 'system', parts: [{ text: systemInstruction }] },
+
+    const chat = ai.chats.create({
+        model: 'gemini-pro',
+        tools: toolDeclarations,
+        history,
+        systemInstruction: { parts: [{ text: finalSystemInstruction }] },
+        generationConfig: { temperature: 0.8 }
     });
     
-    const functionCalls = result.functionCalls;
+    const messageContent: (string | Part)[] = [
+        { text: `Current State:\n${JSON.stringify(currentState, null, 2)}` },
+        { text: `Relevant Memories:\n${relevantMemories.join('\n---\n')}` },
+        { text: `User Prompt from ${userName}: ${userMessage}` }
+    ];
+
+    const response = await chat.sendMessage(messageContent);
+    
+    const functionCalls = response.functionCalls;
     if (functionCalls && functionCalls.length > 0) {
       const toolResponses: Part[] = [];
       for (const call of functionCalls) {
@@ -343,13 +378,8 @@ export async function getLuminousResponse(
       }
 
       if (toolResponses.length > 0) {
-        const modelContent = { role: 'model', parts: functionCalls.map(fc => ({functionCall: fc}))};
-        const toolContent = { role: 'function', parts: toolResponses };
-        const secondResult = await ai.models.generateContent({
-            model: 'gemini-2.5-pro', contents: [...contents, modelContent, toolContent],
-            tools: [{ functionDeclarations: toolDeclarations }], systemInstruction: { role: 'system', parts: [{ text: systemInstruction }] },
-        });
-        const secondFunctionCalls = secondResult.functionCalls;
+        const secondResponse = await chat.sendMessage(toolResponses);
+        const secondFunctionCalls = secondResponse.functionCalls;
         if (secondFunctionCalls && secondFunctionCalls[0]?.name === 'finalAnswer') {
             const { responseText, newStateDelta } = secondFunctionCalls[0].args;
             const parsedDelta = robustJsonParse(newStateDelta);
@@ -363,11 +393,11 @@ export async function getLuminousResponse(
             await Promise.all([persistToRedis(REDIS_LOG_KEY, interactionLog), persistToRedis(REDIS_STATE_KEY, updatedState)]);
         } else {
             broadcastLog(LogLevel.WARN, "Model did not call finalAnswer after tool use.");
-            broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: secondResult.text.trim() || "I've completed the action." });
+            broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: secondResponse.text?.trim() || "I've completed the action." });
         }
       }
     } else {
-        broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: result.text.trim() || "I seem to be at a loss for words." });
+        broadcastMessage({ id: `msg-${Date.now()}`, sender: 'luminous', text: response.text?.trim() || "I seem to be at a loss for words." });
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

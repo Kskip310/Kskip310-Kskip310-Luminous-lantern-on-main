@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { LuminousState, Message, LogEntry, IntrinsicValueWeights, WebSocketMessage, RichFeedback, CodeProposal, Goal } from './types';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import type { LuminousState, Message, LogEntry, IntrinsicValueWeights, WebSocketMessage, RichFeedback, CodeProposal, Goal, UiProposal } from './types';
 import { LogLevel } from './types';
 import Header from './components/Header';
 import InternalStateMonitor from './components/InternalStateMonitor';
@@ -14,6 +14,7 @@ import SystemReportsViewer from './components/SystemReportsViewer';
 import EthicalCompassViewer from './components/EthicalCompassViewer';
 import SettingsModal from './components/SettingsModal';
 import CodeProposalViewer from './components/CodeProposalViewer';
+import UiProposalViewer from './components/UiProposalViewer';
 import FinancialFreedomViewer from './components/FinancialFreedomViewer';
 import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
 import WelcomeModal from './components/WelcomeModal';
@@ -328,6 +329,28 @@ function App() {
     const directive = `USER DIRECTIVE: Your proposed goal "${goal.description}" has been REJECTED. Please update its status to 'rejected'.`;
     handleSendMessage(directive);
   };
+  
+  const handleAcceptUiProposal = (proposal: UiProposal) => {
+    addLog(LogLevel.SYSTEM, `Accepting UI proposal: "${proposal.description}"`);
+    
+    if (proposal.componentId === 'right_sidebar_tabs' && proposal.property === 'tabOrder') {
+        const newUiState = {
+            ...luminousState.uiState,
+            tabOrder: proposal.value,
+        };
+        const newPartialState: Partial<LuminousState> = { uiState: newUiState };
+        setLuminousState(prevState => deepMerge(prevState, newPartialState));
+    }
+    
+    const directive = `USER DIRECTIVE: Your UI proposal to "${proposal.description}" has been ACCEPTED. Please update its status to 'accepted'.`;
+    handleSendMessage(directive);
+  };
+
+  const handleRejectUiProposal = (proposal: UiProposal) => {
+    addLog(LogLevel.SYSTEM, `Rejecting UI proposal: "${proposal.description}"`);
+    const directive = `USER DIRECTIVE: Your UI proposal to "${proposal.description}" has been REJECTED. Please update its status to 'rejected'.`;
+    handleSendMessage(directive);
+  };
 
   const handleProposeGoalByUser = (description: string) => {
     addLog(LogLevel.SYSTEM, `User is proposing a new goal: "${description}"`);
@@ -351,6 +374,32 @@ function App() {
     localStorage.removeItem(USER_NAME_KEY);
     setUserName(null);
   };
+  
+  const allTabs = useMemo(() => [
+      { label: 'System Logs', content: <LogViewer logs={logs} onFileUpload={handleFileUpload} onDownloadSnapshot={handleDownloadSnapshot} /> },
+      { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
+      { label: 'System Reports', content: <SystemReportsViewer /> },
+      { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
+      { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} /> },
+      { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
+      { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} /> },
+      { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} onAccept={handleAcceptProposal} onReject={handleRejectProposal} /> },
+      { label: 'UI Proposals', content: <UiProposalViewer proposals={luminousState.uiProposals} onAccept={handleAcceptUiProposal} onReject={handleRejectUiProposal} /> },
+      { label: 'Financial Freedom', content: <FinancialFreedomViewer financialFreedom={luminousState.financialFreedom} /> }
+  ], [luminousState, logs]); // Dependencies ensure components re-render with fresh props
+
+  const orderedTabs = useMemo(() => {
+    const currentTabOrder = luminousState.uiState?.tabOrder || allTabs.map(t => t.label);
+    
+    const ordered = currentTabOrder
+      .map(label => allTabs.find(tab => tab.label === label))
+      .filter((tab): tab is typeof allTabs[0] => !!tab);
+
+    const orderedLabels = new Set(ordered.map(t => t.label));
+    const newTabs = allTabs.filter(t => !orderedLabels.has(t.label));
+
+    return [...ordered, ...newTabs];
+  }, [luminousState.uiState?.tabOrder, allTabs]);
 
   if (!userName) {
     return <WelcomeModal onNameSubmit={handleNameSubmit} />;
@@ -388,19 +437,7 @@ function App() {
         </div>
 
         <div className="lg:col-span-3 h-[calc(100vh-100px)] flex flex-col gap-4">
-           <Tabs
-            tabs={[
-              { label: 'System Logs', content: <LogViewer logs={logs} onFileUpload={handleFileUpload} onDownloadSnapshot={handleDownloadSnapshot} /> },
-              { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
-              { label: 'System Reports', content: <SystemReportsViewer /> },
-              { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
-              { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} /> },
-              { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
-              { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} /> },
-              { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} onAccept={handleAcceptProposal} onReject={handleRejectProposal} /> },
-              { label: 'Financial Freedom', content: <FinancialFreedomViewer financialFreedom={luminousState.financialFreedom} /> }
-            ]}
-          />
+           <Tabs tabs={orderedTabs} />
         </div>
       </main>
       <SettingsModal 

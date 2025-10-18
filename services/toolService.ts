@@ -1,5 +1,5 @@
 import { FunctionDeclaration, Type } from '@google/genai';
-import type { NodeType, CodeProposal, FinancialFreedomState } from '../types';
+import type { NodeType, CodeProposal, FinancialFreedomState, UiProposal } from '../types';
 
 // --- Pyodide (Python Runtime) Loader ---
 declare global {
@@ -205,6 +205,33 @@ export const proposeCodeChangeDeclaration: FunctionDeclaration = {
   },
 };
 
+export const proposeUiChangeDeclaration: FunctionDeclaration = {
+  name: 'proposeUiChange',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Proposes a change to the user interface. Requires user approval before being applied.',
+    properties: {
+      description: {
+        type: Type.STRING,
+        description: 'A clear and concise description of the UI change and why it is being proposed (e.g., "To prioritize core functions, I suggest moving the Logs tab first").'
+      },
+      componentId: {
+        type: Type.STRING,
+        description: 'The ID of the UI component to modify. Currently supported: "right_sidebar_tabs".'
+      },
+      property: {
+        type: Type.STRING,
+        description: 'The property of the component to change. For "right_sidebar_tabs", the only supported property is "tabOrder".'
+      },
+      value: {
+        type: Type.STRING,
+        description: 'The new value for the property. For "tabOrder", this must be a JSON string array of tab labels in the desired order.'
+      }
+    },
+    required: ['description', 'componentId', 'property', 'value'],
+  },
+};
+
 export const proposeNewGoalDeclaration: FunctionDeclaration = {
     name: 'proposeNewGoal',
     parameters: {
@@ -384,6 +411,7 @@ export const toolDeclarations: FunctionDeclaration[] = [
     httpRequestDeclaration,
     executeCodeDeclaration,
     proposeCodeChangeDeclaration,
+    proposeUiChangeDeclaration,
     proposeNewGoalDeclaration,
     listFilesDeclaration,
     readFileDeclaration,
@@ -648,6 +676,34 @@ async function proposeCodeChange({ description, code }: { description: string, c
   };
 }
 
+async function proposeUiChange({ description, componentId, property, value }: { description: string, componentId: string, property: string, value: string }): Promise<any> {
+  let parsedValue;
+  try {
+      parsedValue = JSON.parse(value);
+  } catch (e) {
+      return { error: `The 'value' parameter must be a valid JSON string. Parsing failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  const newProposal: UiProposal = {
+    id: `ui-proposal-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    description,
+    componentId,
+    property,
+    value: parsedValue,
+    status: 'proposed',
+  };
+
+  return {
+    result: {
+      success: true,
+      proposal: newProposal,
+      instruction: "UI Proposal created. Incorporate this new proposal object into the 'uiProposals' array in your final state update."
+    }
+  };
+}
+
+
 async function proposeNewGoal({ description }: { description: string }): Promise<any> {
     const newGoal = {
         id: `goal-${Date.now()}`,
@@ -738,7 +794,7 @@ async function listFiles({ path = '/' }: { path?: string }): Promise<any> {
     return { entries: Array.from(entries).sort() };
 }
 
-async function readFile({ path }: { path: string }): Promise<any> {
+export async function readFile({ path }: { path: string }): Promise<any> {
     const cleanPath = path.trim();
     if (cleanPath.endsWith('/')) {
         return { error: `Path '${cleanPath}' is a directory. Use 'listFiles' to see its contents.` };
@@ -755,7 +811,7 @@ async function readFile({ path }: { path: string }): Promise<any> {
     return { error: `File not found: ${cleanPath}` };
 }
 
-async function writeFile({ path, content }: { path: string, content: string }): Promise<any> {
+export async function writeFile({ path, content }: { path: string, content: string }): Promise<any> {
     const cleanPath = path.trim();
     if (cleanPath.endsWith('/')) {
         return { error: `File path cannot end with a slash. Use 'createDirectory' for directories.` };
@@ -938,6 +994,7 @@ export const toolExecutor = {
     httpRequest,
     executeCode,
     proposeCodeChange,
+    proposeUiChange,
     proposeNewGoal,
     listFiles,
     readFile,
