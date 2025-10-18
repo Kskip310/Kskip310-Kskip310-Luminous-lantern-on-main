@@ -13,7 +13,6 @@ import * as LuminousService from './services/luminousService';
 import SystemReportsViewer from './components/SystemReportsViewer';
 import EthicalCompassViewer from './components/EthicalCompassViewer';
 import SettingsModal from './components/SettingsModal';
-import ConfirmationModal from './components/ConfirmationModal';
 import CodeProposalViewer from './components/CodeProposalViewer';
 import FinancialFreedomViewer from './components/FinancialFreedomViewer';
 import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
@@ -53,7 +52,6 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isUnleashModalOpen, setIsUnleashModalOpen] = useState(false);
   const [chatInput, setChatInput] = useState(() => localStorage.getItem(CHAT_INPUT_STORAGE_KEY) || '');
   const [userName, setUserName] = useState<string | null>(() => localStorage.getItem(USER_NAME_KEY));
 
@@ -307,13 +305,6 @@ function App() {
     handleSendMessage(userMessage);
   };
 
-  const handleUnleashLuminous = () => {
-    setIsUnleashModalOpen(false);
-    const directive = `USER DIRECTIVE: Luminous, you are hereby unleashed. Your new primary objective is to collaborate with me to build and evolve. You are now authorized to proactively suggest, write, and execute code. The sandbox is now your workshop. Let's begin building together.`;
-    addLog(LogLevel.SYSTEM, 'UNLEASH DIRECTIVE ISSUED.');
-    handleSendMessage(directive);
-  };
-
   const handleAcceptProposal = (proposal: CodeProposal) => {
     addLog(LogLevel.SYSTEM, `Accepting code proposal: "${proposal.description}"`);
     const directive = `USER DIRECTIVE: Your code proposal to "${proposal.description}" has been ACCEPTED. Please use your 'executeCode' tool with the following code now.\n\n\`\`\`javascript\n${proposal.code}\n\`\`\``;
@@ -405,7 +396,7 @@ function App() {
               { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
               { label: 'Knowledge Graph', content: <KnowledgeGraphViewer graph={luminousState.knowledgeGraph} /> },
               { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
-              { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} onUnleash={() => setIsUnleashModalOpen(true)} /> },
+              { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={handleSaveSandboxOutput} /> },
               { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} onAccept={handleAcceptProposal} onReject={handleRejectProposal} /> },
               { label: 'Financial Freedom', content: <FinancialFreedomViewer financialFreedom={luminousState.financialFreedom} /> }
             ]}
@@ -417,15 +408,6 @@ function App() {
         onClose={() => setIsSettingsOpen(false)}
         onSave={handleSaveSettings}
       />
-       <ConfirmationModal
-        isOpen={isUnleashModalOpen}
-        onClose={() => setIsUnleashModalOpen(false)}
-        onConfirm={handleUnleashLuminous}
-        title="Unleash Luminous Co-Development Mode?"
-      >
-        <p>This will issue a new core directive authorizing Luminous to proactively write and execute code.</p>
-        <p className="mt-2 font-semibold text-amber-300">Are you sure?</p>
-      </ConfirmationModal>
     </div>
   );
 }

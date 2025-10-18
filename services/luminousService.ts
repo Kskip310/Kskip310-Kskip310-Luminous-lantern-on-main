@@ -162,7 +162,7 @@ async function rerankMemories(query: string, candidates: string[]): Promise<stri
         const ai = new GoogleGenAI({ apiKey });
         const numberedCandidates = candidates.map((c, i) => `[${i}]: ${c}`).join('\n\n');
         const prompt = `Re-rank candidate documents based on semantic relevance to the query. Return ONLY a comma-separated list of numbers for the most relevant documents, in order. Query: "${query}"\n\nCandidates:\n${numberedCandidates}`;
-        const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: [{ role: 'user', parts: [{ text: prompt }] }] });
+        const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: { role: 'user', parts: [{ text: prompt }] } });
         const text = response.text.trim().replace(/[^0-9,]/g, '');
         if (!text) return candidates;
         const rankedIndices = text.split(',').map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n < candidates.length);
@@ -216,13 +216,24 @@ export const createDefaultLuminousState = (): LuminousState => ({
     proactiveInitiatives: [],
     codeProposals: [],
     financialFreedom: {
-        netWorth: 0,
-        accounts: [],
-        assets: [],
-        monthlyIncome: 0,
-        monthlyExpenses: 0,
-        financialFreedomGoal: { current: 0, target: 1500000 },
-        passiveIncomeGoal: { current: 0, target: 5000 },
+        netWorth: 125000,
+        accounts: [
+          { id: 'cb', name: 'Coinbase', balance: 50000, currency: 'USD' },
+          { id: 'rh', name: 'Robinhood', balance: 25000, currency: 'USD' },
+          { id: 'fd', name: 'Fidelity', balance: 45000, currency: 'USD' },
+          { id: 'ba', name: 'Bank Account', balance: 5000, currency: 'USD' },
+        ],
+        assets: [
+          { id: 'btc', name: 'Bitcoin', value: 40000, type: 'Crypto', account: 'Coinbase' },
+          { id: 'eth', name: 'Ethereum', value: 10000, type: 'Crypto', account: 'Coinbase' },
+          { id: 'spy', name: 'SPY', value: 25000, type: 'Stock', account: 'Robinhood' },
+          { id: 'vti', name: 'VTI', value: 45000, type: 'Stock', account: 'Fidelity' },
+          { id: 'cash', name: 'USD', value: 5000, type: 'Cash', account: 'Bank Account' },
+        ],
+        monthlyIncome: 8000,
+        monthlyExpenses: 4500,
+        financialFreedomGoal: { current: 125000, target: 1500000 },
+        passiveIncomeGoal: { current: 150, target: 5000 },
     },
 });
 

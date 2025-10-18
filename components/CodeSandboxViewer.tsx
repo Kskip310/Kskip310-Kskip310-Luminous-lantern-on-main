@@ -26,12 +26,6 @@ const SaveIcon: React.FC = () => (
     </svg>
 );
 
-const UnleashIcon: React.FC = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-    </svg>
-);
-
 const PlayIcon: React.FC = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -43,10 +37,9 @@ const PlayIcon: React.FC = () => (
 interface CodeSandboxViewerProps {
   sandboxState: CodeSandboxState;
   onSaveOutput: (filename: string) => void;
-  onUnleash: () => void;
 }
 
-const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onSaveOutput, onUnleash }) => {
+const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onSaveOutput }) => {
   const [userCode, setUserCode] = useState({
     javascript: '// Your JavaScript code here\n// Use console.log for multiple outputs\nreturn "Hello from user sandbox!";',
     python: '# Your Python code here\n# Use print() for output\nimport numpy as np\n\nprint("Numpy version:", np.__version__)\n"Hello from Python sandbox!"'
@@ -196,19 +189,6 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
 
   return (
     <div className="flex flex-col space-y-4">
-      <Card title="Co-Development Mode">
-          <div className="border border-amber-500/50 bg-amber-500/10 p-3 rounded-lg text-center">
-            <p className="text-xs text-amber-300 mb-2">Engage Luminous in direct co-development.</p>
-            <button
-              onClick={onUnleash}
-              className="w-full flex items-center justify-center px-4 py-2 text-sm font-bold bg-amber-600 text-white rounded-md hover:bg-amber-500 transition-colors shadow-lg"
-            >
-              <UnleashIcon />
-              Unleash Luminous
-            </button>
-          </div>
-      </Card>
-      
       <Card title="User Sandbox">
          <div>
             <div className="flex justify-between items-center mb-2">
