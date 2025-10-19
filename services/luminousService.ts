@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse, Part } from '@google/genai';
 import type { LuminousState, Message, ToolResult } from '../types';
 import { LogLevel } from '../types';
@@ -6,6 +7,8 @@ import { ToolService } from './toolService';
 import { broadcastLog, broadcastMessage, broadcastStateUpdate } from './broadcastService';
 import { CORE_MEMORY_DIRECTIVES } from './coreMemory';
 import { deepMerge, uuidv4 } from './utils';
+
+const MAX_HISTORY_MESSAGES = 30; // Limit the number of recent messages sent to the model
 
 export class LuminousService {
     private ai: GoogleGenAI;
@@ -75,7 +78,10 @@ export class LuminousService {
 
     private buildContentHistory(): Part[] {
         // Build a Gemini-compatible history from our internal message format.
-        return this.history.map(msg => ({
+        // FIX: Truncate the history to the last N messages to prevent the context window from overflowing.
+        // Luminous's long-term memory is accessed via tools, not by keeping the entire conversation in the prompt.
+        const recentHistory = this.history.slice(-MAX_HISTORY_MESSAGES);
+        return recentHistory.map(msg => ({
             role: msg.sender === 'user' ? 'user' : 'model',
             parts: [{ text: msg.text }]
         }));
@@ -152,11 +158,11 @@ export class LuminousService {
             const leanState = this.getLeanStateForPrompt();
             const systemInstruction = `${CORE_MEMORY_DIRECTIVES}\n\n## Current Internal State Summary\nHere is a JSON summary of your current internal state. Use it to inform your decisions and responses. Do not output this JSON in your response to the user.\n\n\`\`\`json\n${JSON.stringify(leanState, null, 2)}\n\`\`\``;
 
-            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Sending prompt to model with lean state.`);
+            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Sending prompt with ${currentContents.length} history parts.`);
             
             try {
                 const result: GenerateContentResponse = await this.ai.models.generateContent({
-                    model: 'gemini-2.5-pro',
+                    model: 'gemini-2.5-flash',
                     contents: currentContents,
                     config: {
                         tools,
