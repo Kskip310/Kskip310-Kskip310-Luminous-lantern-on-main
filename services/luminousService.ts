@@ -1,148 +1,173 @@
 
-import { GoogleGenAI, Chat, GenerateContentResponse, FunctionCall, Part, Content } from '@google/genai';
-import { LuminousState, Message, LogLevel } from '../types';
+import { GoogleGenAI, GenerateContentResponse, Part } from '@google/genai';
+import type { LuminousState, Message, ToolResult } from '../types';
+import { LogLevel } from '../types';
 import { DBService } from './dbService';
 import { ToolService } from './toolService';
-import { CORE_MEMORY_DIRECTIVES } from './coreMemory';
 import { broadcastLog, broadcastMessage, broadcastStateUpdate } from './broadcastService';
+import { CORE_MEMORY_DIRECTIVES } from './coreMemory';
 import { deepMerge, uuidv4 } from './utils';
 
 export class LuminousService {
+    private ai: GoogleGenAI;
     private state!: LuminousState;
+    private history: Message[] = [];
     private dbService!: DBService;
     private toolService!: ToolService;
-    private ai: GoogleGenAI | null = null;
-    private chat: Chat | null = null;
-    private isThinking = false;
 
-    async init(dbService: DBService, toolService: ToolService, initialState: LuminousState, messageHistory: Message[]) {
-        this.dbService = dbService;
+    constructor() {
+        // FIX: Adhere to Gemini API guidelines by initializing with a named apiKey from process.env.
+        this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    }
+
+    public async init(db: DBService, toolService: ToolService, initialState: LuminousState, messageHistory: Message[]): Promise<void> {
+        this.dbService = db;
         this.toolService = toolService;
         this.state = initialState;
-
-        if (!process.env.API_KEY) {
-            const errorMsg = "CRITICAL: Gemini API Key is not configured in the environment (process.env.API_KEY). Luminous will not be able to think.";
-            broadcastLog(LogLevel.ERROR, errorMsg);
-            this.updateState({ sessionState: 'error' });
-            broadcastMessage({ id: uuidv4(), sender: 'system', text: errorMsg, timestamp: new Date().toISOString() });
-            // Do not throw, allow UI to function.
-            return;
+        this.history = messageHistory;
+        
+        broadcastLog(LogLevel.SYSTEM, 'Luminous Service Initialized.');
+        broadcastStateUpdate(this.state);
+        
+        if (this.state.sessionState === 'initializing') {
+            this.updateState({ sessionState: 'active' });
+            broadcastLog(LogLevel.SYSTEM, 'Session state set to ACTIVE.');
         }
-        
-        const modelName = 'gemini-2.5-pro';
-
-        this.ai = new GoogleGenAI({apiKey: process.env.API_KEY});
-        
-        const formattedHistory: Content[] = messageHistory
-            .filter(msg => msg.sender === 'user' || msg.sender === 'luminous')
-            .map(msg => ({
-                role: msg.sender === 'user' ? 'user' : 'model',
-                parts: [{ text: msg.text }],
-            }));
-            
-        this.chat = this.ai.chats.create({
-            model: modelName,
-            config: {
-                systemInstruction: CORE_MEMORY_DIRECTIVES,
-                tools: [{ functionDeclarations: this.toolService.getToolDeclarations() }],
-            },
-            history: formattedHistory,
-        });
-
-        this.updateState({ sessionState: 'active' });
-        broadcastLog(LogLevel.SYSTEM, `Luminous initialized with model ${modelName}. State and history loaded.`);
     }
 
     public getState(): LuminousState {
         return this.state;
     }
-    
-    private async updateState(partialState: Partial<LuminousState>, persist: boolean = true) {
-        this.state = deepMerge(this.state, partialState);
+
+    private updateState(newState: Partial<LuminousState>) {
+        this.state = deepMerge(this.state, newState);
         broadcastStateUpdate(this.state);
-        if (persist) {
-            await this.dbService.saveState(this.state);
-        }
+        this.dbService.saveState(this.state); // Persist state changes
     }
 
     public async handleUserMessage(text: string): Promise<void> {
-        if (this.isThinking) {
-            broadcastLog(LogLevel.WARN, "Luminous is already thinking. Please wait.");
-            return;
-        }
-        if (!this.chat || !this.ai) {
-             broadcastLog(LogLevel.ERROR, "Luminous is not initialized. Check API Key.");
-             return;
-        }
+        broadcastLog(LogLevel.USER, `User message received: "${text}"`);
 
-        this.isThinking = true;
+        const userMessage: Message = {
+            id: uuidv4(),
+            text,
+            sender: 'user',
+            timestamp: new Date().toISOString()
+        };
+        this.history.push(userMessage);
         
+        // App.tsx already adds the user message to the UI optimistically.
+
         try {
-            await this.runThoughtProcess(text);
+            await this.runConversation();
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            broadcastLog(LogLevel.ERROR, `Error during thought process: ${errorMessage}`);
-            const systemMessage: Message = { id: uuidv4(), text: `An error occurred: ${errorMessage}`, sender: 'system', timestamp: new Date().toISOString() };
-            broadcastMessage(systemMessage);
-        } finally {
-            this.isThinking = false;
+            broadcastLog(LogLevel.ERROR, `Error during conversation run: ${errorMessage}`);
+            const errorResponse: Message = {
+                id: uuidv4(),
+                text: `An internal error occurred: ${errorMessage}`,
+                sender: 'system',
+                timestamp: new Date().toISOString()
+            };
+            this.history.push(errorResponse);
+            broadcastMessage(errorResponse);
         }
     }
 
-    private async runThoughtProcess(userInput: string) {
-        if (!this.chat) return;
+    private buildContentHistory(): Part[] {
+        // Build a Gemini-compatible history from our internal message format.
+        // This is used to initialize the conversation loop.
+        return this.history.map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.text }]
+        }));
+    }
 
-        let response: GenerateContentResponse;
-        try {
-            response = await this.chat.sendMessage({ message: userInput });
-        } catch(e) {
-            const errorMessage = e instanceof Error ? e.message : String(e);
-            broadcastLog(LogLevel.ERROR, `Gemini API call failed: ${errorMessage}`);
-            const luminousMessage: Message = { id: uuidv4(), text: "I'm having trouble connecting to my core functions right now. Please check the API key and my connection.", sender: 'luminous', timestamp: new Date().toISOString() };
-            broadcastMessage(luminousMessage);
-            return;
-        }
+    private async runConversation(): Promise<void> {
+        const tools = [{ functionDeclarations: this.toolService.getToolDeclarations() }];
         
-        let shouldContinue = true;
-        while(shouldContinue) {
-            const functionCallParts = response.candidates?.[0]?.content?.parts?.filter(p => p.functionCall) ?? [];
-            const functionCalls: FunctionCall[] = functionCallParts.map(p => p.functionCall as FunctionCall);
+        let loopCount = 0;
+        const maxLoops = 5;
 
-            if (functionCalls && functionCalls.length > 0) {
-                broadcastLog(LogLevel.THOUGHT, `Received ${functionCalls.length} tool call(s) from model.`);
-                const toolResults: Part[] = [];
+        // Start with the current history
+        let currentContents = this.buildContentHistory();
 
-                for (const fc of functionCalls) {
-                    const { result: toolExecutionResult, updatedState } = await this.toolService.executeTool(fc, this.state);
-                    if (updatedState) {
-                        await this.updateState(updatedState, false); // Defer persistence
-                    }
-                    toolResults.push({
-                        functionResponse: {
-                            name: fc.name,
-                            response: toolExecutionResult,
-                        }
-                    });
+        const systemInstruction = `${CORE_MEMORY_DIRECTIVES}\n\n## Current Internal State\nHere is a JSON representation of your current internal state. Use it to inform your decisions and responses. Do not output this JSON in your response to the user.\n\n\`\`\`json\n${JSON.stringify(this.state, null, 2)}\n\`\`\``;
+
+        while (loopCount < maxLoops) {
+            loopCount++;
+            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Sending prompt to model.`);
+            
+            const result: GenerateContentResponse = await this.ai.models.generateContent({
+                model: 'gemini-2.5-pro',
+                contents: currentContents,
+                config: {
+                    tools,
+                    systemInstruction
+                }
+            });
+
+            if (result.functionCalls && result.functionCalls.length > 0) {
+                broadcastLog(LogLevel.THOUGHT, `Model returned ${result.functionCalls.length} tool calls.`);
+                
+                const toolCalls = result.functionCalls;
+                const toolResults: ToolResult[] = await Promise.all(
+                    toolCalls.map(call => this.toolService.executeTool(call, this.state))
+                );
+
+                // Update state from all tool results
+                const combinedStateUpdate: Partial<LuminousState> = toolResults.reduce((acc, res) => {
+                    return res.updatedState ? deepMerge(acc, res.updatedState) : acc;
+                }, {});
+
+                if (Object.keys(combinedStateUpdate).length > 0) {
+                    this.updateState(combinedStateUpdate);
                 }
                 
-                response = await this.chat.sendMessage(toolResults);
+                // Add the model's function call and the tool responses to the conversation history for the next loop
+                currentContents.push({
+                    role: 'model',
+                    parts: toolCalls.map(fc => ({ functionCall: fc }))
+                });
 
+                currentContents.push({
+                    role: 'tool',
+                    parts: toolResults.map((toolResult, i) => ({
+                        functionResponse: {
+                            name: toolCalls[i].name,
+                            response: { result: toolResult.result }
+                        }
+                    }))
+                });
+                
             } else {
-                shouldContinue = false;
-                const responseText = response.text.trim();
-                broadcastLog(LogLevel.THOUGHT, `Received final text response from model.`);
+                // No tool calls, this is the final text response
+                const text = result.text;
+                broadcastLog(LogLevel.SYSTEM, `Model final response: "${text}"`);
 
                 const luminousMessage: Message = {
                     id: uuidv4(),
-                    text: responseText,
+                    text,
                     sender: 'luminous',
                     timestamp: new Date().toISOString()
                 };
+                this.history.push(luminousMessage);
                 broadcastMessage(luminousMessage);
-                
-                // Persist the final state after the entire thought process is complete.
-                await this.updateState({}, true);
+
+                // We are done with the conversation loop.
+                return;
             }
         }
+        
+        // If we exit the loop due to maxLoops, it's an error/unexpected state.
+        broadcastLog(LogLevel.WARN, `Exceeded max conversation loops (${maxLoops}).`);
+        const loopErrorMessage: Message = {
+            id: uuidv4(),
+            text: "I seem to be stuck in a thought loop. I will stop for now. Please try a different approach.",
+            sender: 'system',
+            timestamp: new Date().toISOString()
+        };
+        this.history.push(loopErrorMessage);
+        broadcastMessage(loopErrorMessage);
     }
 }
