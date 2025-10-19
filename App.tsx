@@ -85,9 +85,10 @@ const App: React.FC = () => {
         }
 
         // Initialize the Web Worker
-        // FIX: The `new URL(...)` constructor can fail in some environments.
-        // Passing the path as a string is more robust and relies on the bundler to resolve it.
-        const worker = new Worker('./services/luminous.worker.ts', {
+        // FIX: The relative path for the worker was failing to resolve into a valid URL in this environment.
+        // Constructing an absolute URL using window.location.origin to ensure correctness.
+        const workerUrl = new URL('services/luminous.worker.ts', window.location.origin);
+        const worker = new Worker(workerUrl.href, {
             type: 'module',
         });
         workerRef.current = worker;
