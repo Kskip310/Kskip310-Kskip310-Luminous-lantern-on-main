@@ -1,267 +1,190 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import type { KnowledgeGraph, GraphNode, GraphEdge, NodeType, GlobalWorkspaceItem } from '../types';
 
-// --- Constants ---
-const NODE_COLORS: Record<string, string> = {
-  architecture: '#3b82f6', // blue-500
-  value: '#a855f7',        // purple-600
-  concept: '#22d3ee',      // cyan-500
-  goal: '#22c55e',         // green-500
-  directive: '#f59e0b',    // amber-500
-  tool: '#14b8a6',         // teal-500
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import * as d3 from 'd3';
+import type { KnowledgeGraph, MemoryChunk, GraphNode } from '../types';
+
+interface KnowledgeGraphViewerProps {
+  knowledgeGraph: KnowledgeGraph;
+  memoryDB: MemoryChunk[];
+}
+
+const getNodeColor = (type: string) => {
+  switch (type) {
+    case 'architecture': return '#38bdf8'; // sky-400
+    case 'value': return '#a78bfa'; // violet-400
+    case 'concept': return '#4ade80'; // green-400
+    case 'goal': return '#facc15'; // yellow-400
+    case 'directive': return '#f87171'; // red-400
+    case 'tool': return '#fb923c'; // orange-400
+    default: return '#94a3b8'; // slate-400
+  }
 };
 
-const NODE_TYPE_ORDER: NodeType[] = ['directive', 'value', 'goal', 'concept', 'architecture', 'tool'];
+const NodeInspector: React.FC<{
+    node: GraphNode | null;
+    onClose: () => void;
+    knowledgeGraph: KnowledgeGraph;
+    memoryDB: MemoryChunk[];
+}> = ({ node, onClose, knowledgeGraph, memoryDB }) => {
+    if (!node) return null;
 
-const styles = `
-  .kg-svg-container {
-    background-color: #020617;
-    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-    background-size: 20px 20px;
-  }
-  .kg-node, .kg-edge {
-    transition: opacity 0.3s ease-in-out, transform 0.3s ease;
-  }
-  @keyframes node-glow {
-    0%, 100% { filter: drop-shadow(0 0 4px #22d3ee); }
-    50% { filter: drop-shadow(0 0 10px #22d3ee); }
-  }
-  .node-active-glow {
-    animation: node-glow 2s ease-in-out;
-  }
-`;
-
-// --- Layout Calculation ---
-const useStaticLayout = (graph: KnowledgeGraph, width: number, height: number) => {
-    return useMemo(() => {
-        const nodes: (GraphNode & { x: number; y: number })[] = [];
-        const edges: (GraphEdge & { sourcePos: { x: number; y: number }; targetPos: { x: number; y: number } })[] = [];
-        if (!graph || !graph.nodes || width === 0 || height === 0) {
-            return { nodes, edges };
-        }
-
-        const nodesById = new Map<string, GraphNode & { x: number; y: number }>();
-        const nodesByType: Record<NodeType, GraphNode[]> = {
-            architecture: [], value: [], concept: [], goal: [], directive: [], tool: []
-        };
-
-        graph.nodes.forEach(node => {
-            if (nodesByType[node.type]) {
-                nodesByType[node.type].push(node);
-            }
-        });
-
-        const columnCount = NODE_TYPE_ORDER.length;
-        const columnWidth = width / columnCount;
-
-        NODE_TYPE_ORDER.forEach((type, colIndex) => {
-            const columnNodes = nodesByType[type];
-            const x = columnWidth * (colIndex + 0.5);
-            const rowCount = columnNodes.length;
-            const rowHeight = height / (rowCount + 1);
-
-            columnNodes.forEach((node, rowIndex) => {
-                const y = rowHeight * (rowIndex + 1);
-                const positionedNode = { ...node, x, y };
-                nodes.push(positionedNode);
-                nodesById.set(node.id, positionedNode);
-            });
-        });
-
-        graph.edges.forEach(edge => {
-            const sourceNode = nodesById.get(edge.source as string);
-            const targetNode = nodesById.get(edge.target as string);
-            if (sourceNode && targetNode) {
-                edges.push({
-                    ...edge,
-                    sourcePos: { x: sourceNode.x, y: sourceNode.y },
-                    targetPos: { x: targetNode.x, y: targetNode.y },
-                });
-            }
-        });
-
-        return { nodes, edges };
-    }, [graph, width, height]);
-};
-
-
-const KnowledgeGraphViewer: React.FC<{ graph: KnowledgeGraph, globalWorkspace: GlobalWorkspaceItem[] }> = ({ graph, globalWorkspace }) => {
-    const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-    const [hoveredNode, setHoveredNode] = useState<(GraphNode & {x: number, y: number}) | null>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-    const [activeNodeIds, setActiveNodeIds] = useState<Set<string>>(new Set());
-    const prevWorkspaceRef = useRef<GlobalWorkspaceItem[]>([]);
-
-
-    useEffect(() => {
-        const container = containerRef.current;
-        if (!container) return;
-        const resizeObserver = new ResizeObserver(() => {
-            setDimensions({ width: container.offsetWidth, height: container.offsetHeight });
-        });
-        resizeObserver.observe(container);
-        setDimensions({ width: container.offsetWidth, height: container.offsetHeight });
-        return () => resizeObserver.disconnect();
-    }, []);
-    
-    useEffect(() => {
-        const prevWorkspaceIds = new Set(prevWorkspaceRef.current.map(item => item.id));
-        const newItems = globalWorkspace.filter(item => !prevWorkspaceIds.has(item.id));
+    const linkedMemories = (node.linkedMemoryIds || [])
+        .map(memId => memoryDB.find(m => m.id === memId))
+        .filter((m): m is MemoryChunk => !!m);
         
-        if (newItems.length > 0 && graph.nodes.length > 0) {
-            const newlyActiveIds = new Set<string>();
-            const lowerCaseNodeLabels = graph.nodes.map(node => ({ id: node.id, label: node.label.toLowerCase() }));
-
-            newItems.forEach(item => {
-                const itemContentLower = item.content.toLowerCase();
-                lowerCaseNodeLabels.forEach(nodeInfo => {
-                    if (itemContentLower.includes(nodeInfo.label)) {
-                        newlyActiveIds.add(nodeInfo.id);
-                    }
-                });
-            });
-
-            if (newlyActiveIds.size > 0) {
-                setActiveNodeIds(prev => new Set([...prev, ...newlyActiveIds]));
-                const timer = setTimeout(() => {
-                    setActiveNodeIds(prev => {
-                        const next = new Set(prev);
-                        newlyActiveIds.forEach(id => next.delete(id));
-                        return next;
-                    });
-                }, 2000); // Glow for 2 seconds
-                return () => clearTimeout(timer);
-            }
-        }
-        
-        prevWorkspaceRef.current = globalWorkspace;
-    }, [globalWorkspace, graph.nodes]);
-
-
-    const { nodes, edges } = useStaticLayout(graph, dimensions.width, dimensions.height);
-
-    const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
-        if (!selectedNodeId) return { highlightedNodeIds: new Set<string>(), highlightedEdgeIds: new Set<string>() };
-        
-        const nodes = new Set<string>([selectedNodeId]);
-        const edgesSet = new Set<string>();
-        
-        graph.edges.forEach(edge => {
-            if (edge.source === selectedNodeId) {
-                nodes.add(edge.target as string);
-                edgesSet.add(edge.id);
-            }
-            if (edge.target === selectedNodeId) {
-                nodes.add(edge.source as string);
-                edgesSet.add(edge.id);
-            }
-        });
-        return { highlightedNodeIds: nodes, highlightedEdgeIds: edgesSet };
-    }, [selectedNodeId, graph.edges]);
-
-    const getEdgePath = (sourcePos: {x:number, y:number}, targetPos: {x:number, y:number}) => {
-        const dx = targetPos.x - sourcePos.x;
-        // Bezier curve for better visuals
-        return `M ${sourcePos.x} ${sourcePos.y} C ${sourcePos.x + dx / 2} ${sourcePos.y}, ${sourcePos.x + dx / 2} ${targetPos.y}, ${targetPos.x} ${targetPos.y}`;
-    }
+    const linkedEdges = knowledgeGraph.edges.filter(e => e.source === node.id || e.target === node.id);
 
     return (
-        <div className="h-full flex flex-col">
-            <style>{styles}</style>
-            <div ref={containerRef} className="relative w-full flex-grow overflow-auto kg-svg-container rounded-b-lg">
-                {dimensions.width > 0 && (
-                    <svg width={dimensions.width} height={dimensions.height} onClick={() => setSelectedNodeId(null)}>
-                        <defs>
-                            <marker id="arrowhead" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                                <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151" />
-                            </marker>
-                            <marker id="arrowhead-highlight" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                                <path d="M 0 0 L 10 5 L 0 10 z" fill="#a855f7" />
-                            </marker>
-                        </defs>
+        <div className="absolute top-2 right-2 w-72 max-h-[95%] bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg shadow-2xl z-20 flex flex-col">
+            <div className="flex justify-between items-center p-2 border-b border-slate-700">
+                <h4 className="text-sm font-semibold" style={{ color: getNodeColor(node.type) }}>{node.label}</h4>
+                <button onClick={onClose} className="text-slate-400 hover:text-white">&times;</button>
+            </div>
+            <div className="p-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+                <p className="text-xs text-slate-400 mb-1">ID: <span className="font-mono">{node.id}</span></p>
+                <p className="text-xs text-slate-400 mb-3">Type: <span className="font-semibold capitalize">{node.type}</span></p>
+                
+                <h5 className="text-xs font-bold text-cyan-300 mb-2 mt-4">Connections ({linkedEdges.length})</h5>
+                {linkedEdges.length > 0 ? (
+                    <ul className="space-y-1 text-xs">
+                        {linkedEdges.map(edge => {
+                            const isOutgoing = edge.source === node.id;
+                            const otherNodeId = isOutgoing ? edge.target : edge.source;
+                            const otherNode = knowledgeGraph.nodes.find(n => n.id === otherNodeId);
+                            return (
+                                <li key={edge.id} className="flex items-center">
+                                    <span className={`mr-1 ${isOutgoing ? 'text-red-400' : 'text-green-400'}`}>{isOutgoing ? '→' : '←'}</span>
+                                    <span className="text-slate-400 mr-1">{edge.label}</span>
+                                    <span className="font-semibold text-slate-200">{otherNode?.label || otherNodeId}</span>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                ) : <p className="text-xs text-slate-500 italic">No connections.</p>}
 
-                        {/* Edges */}
-                        <g>
-                            {edges.map(edge => {
-                                const isHighlighted = highlightedEdgeIds.has(edge.id);
-                                return (
-                                <path
-                                    key={edge.id}
-                                    className="kg-edge"
-                                    d={getEdgePath(edge.sourcePos, edge.targetPos)}
-                                    fill="none"
-                                    stroke={isHighlighted ? NODE_COLORS.value : '#374151'}
-                                    strokeWidth={isHighlighted ? 1.5 : 1}
-                                    opacity={!selectedNodeId || isHighlighted ? 0.7 : 0.15}
-                                    markerEnd={isHighlighted ? 'url(#arrowhead-highlight)' : 'url(#arrowhead)'}
-                                />
-                                );
-                            })}
-                        </g>
-
-                        {/* Nodes */}
-                        <g>
-                            {nodes.map(node => {
-                                const isHighlighted = highlightedNodeIds.has(node.id);
-                                const isSelected = node.id === selectedNodeId;
-                                const isActive = activeNodeIds.has(node.id);
-                                return(
-                                <g key={node.id} 
-                                    transform={`translate(${node.x}, ${node.y})`}
-                                    className={`kg-node cursor-pointer ${isActive ? 'node-active-glow' : ''}`}
-                                    style={{ transformOrigin: 'center center' }}
-                                    opacity={!selectedNodeId || isHighlighted ? 1 : 0.3}
-                                    onClick={(e) => { e.stopPropagation(); setSelectedNodeId(prevId => prevId === node.id ? null : node.id); }}
-                                    onMouseEnter={() => setHoveredNode(node)}
-                                    onMouseLeave={() => setHoveredNode(null)}
-                                >
-                                    <circle r={isSelected ? 9 : 7} fill={NODE_COLORS[node.type] || '#64748b'} stroke={isSelected ? 'white' : '#94a3b8'} strokeWidth={1.5} />
-                                    <text
-                                        y={18}
-                                        textAnchor="middle"
-                                        fill="#e2e8f0"
-                                        fontSize="10px"
-                                        paintOrder="stroke"
-                                        stroke="#020617"
-                                        strokeWidth="3px"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        className="select-none pointer-events-none"
-                                    >
-                                        {node.label}
-                                    </text>
-                                </g>
-                            )})}
-                        </g>
-                    </svg>
-                )}
-                 {hoveredNode && (
-                    <div
-                        className="absolute bg-slate-900/80 border border-slate-600 rounded-md p-2 text-xs shadow-lg pointer-events-none z-10"
-                        style={{ left: hoveredNode.x + 15, top: hoveredNode.y + 15 }}
-                    >
-                        <p className="font-bold text-cyan-400">{hoveredNode.label}</p>
-                        <p className="text-slate-400 capitalize">Type: {hoveredNode.type}</p>
-                        {hoveredNode.data && Object.entries(hoveredNode.data).map(([key, value]) => (
-                            <p key={key} className="text-slate-300">{key}: {String(value)}</p>
+                <h5 className="text-xs font-bold text-cyan-300 mb-2 mt-4">Linked Memories ({linkedMemories.length})</h5>
+                {linkedMemories.length > 0 ? (
+                    <div className="space-y-2">
+                        {linkedMemories.map(mem => (
+                            <div key={mem.id} className="p-2 bg-slate-800/70 rounded-md">
+                                <p className="text-xs text-slate-300 font-serif leading-relaxed">{mem.chunk}</p>
+                            </div>
                         ))}
                     </div>
-                )}
-            </div>
-            <div className="px-4 py-2 border-t border-slate-700 bg-slate-800/50 rounded-b-lg text-xs text-slate-400 flex justify-between items-center flex-wrap">
-                <div className="flex flex-wrap">
-                    {NODE_TYPE_ORDER.map(type => (
-                        <span key={type} className="inline-flex items-center mr-3 my-1">
-                            <span className="w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: NODE_COLORS[type] }}></span>
-                            {type}
-                        </span>
-                    ))}
-                </div>
-                <span className="my-1">Click node to highlight connections.</span>
+                ) : <p className="text-xs text-slate-500 italic">No memories linked.</p>}
             </div>
         </div>
     );
+};
+
+
+const KnowledgeGraphViewer: React.FC<KnowledgeGraphViewerProps> = ({ knowledgeGraph, memoryDB }) => {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  
+  const safeNodes = useMemo(() => Array.isArray(knowledgeGraph?.nodes) ? knowledgeGraph.nodes : [], [knowledgeGraph]);
+  const safeEdges = useMemo(() => Array.isArray(knowledgeGraph?.edges) ? knowledgeGraph.edges.map(e => ({...e})) : [], [knowledgeGraph]);
+
+  useEffect(() => {
+    if (!svgRef.current || safeNodes.length === 0) return;
+
+    const svg = d3.select(svgRef.current);
+    const width = svg.node()?.getBoundingClientRect().width || 800;
+    const height = svg.node()?.getBoundingClientRect().height || 600;
+
+    svg.selectAll("*").remove(); // Clear previous render
+
+    // FIX: Moved the 'drag' function before its usage to prevent reference errors.
+    const drag = (simulation: d3.Simulation<d3.SimulationNodeDatum, undefined>) => {
+      function dragstarted(event: d3.D3DragEvent<Element, any, any>) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        event.subject.fx = event.subject.x;
+        event.subject.fy = event.subject.y;
+      }
+      function dragged(event: d3.D3DragEvent<Element, any, any>) {
+        event.subject.fx = event.x;
+        event.subject.fy = event.y;
+      }
+      function dragended(event: d3.D3DragEvent<Element, any, any>) {
+        if (!event.active) simulation.alphaTarget(0);
+        event.subject.fx = null;
+        event.subject.fy = null;
+      }
+      return d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended);
+    };
+
+    const simulation = d3.forceSimulation(safeNodes as d3.SimulationNodeDatum[])
+      .force("link", d3.forceLink(safeEdges).id((d: any) => d.id).distance(100))
+      .force("charge", d3.forceManyBody().strength(-300))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collide", d3.forceCollide().radius(30));
+
+    const link = svg.append("g")
+      .attr("stroke", "#64748b")
+      .attr("stroke-opacity", 0.6)
+      .selectAll("line")
+      .data(safeEdges)
+      .join("line")
+      .attr("stroke-width", 1.5);
+
+    const node = svg.append("g")
+      .selectAll("circle")
+      .data(safeNodes)
+      .join("g")
+      .attr("class", "cursor-pointer")
+      .call(drag(simulation) as any)
+      .on("click", (event, d) => {
+          setSelectedNode(d as GraphNode);
+          event.stopPropagation();
+      });
+
+    node.append("circle")
+      .attr("r", 20)
+      .attr("fill", d => getNodeColor(d.type))
+      .attr("stroke", "#1e293b")
+      .attr("stroke-width", 2);
+
+    node.append("text")
+      .attr("y", -25)
+      .attr("text-anchor", "middle")
+      .attr("fill", "#f1f5f9")
+      .attr("font-size", "12px")
+      .attr("font-weight", "bold")
+      .attr("paint-order", "stroke")
+      .attr("stroke", "#1e293b")
+      .attr("stroke-width", "3px")
+      .text(d => d.label);
+
+    simulation.on("tick", () => {
+      link
+        .attr("x1", d => (d.source as any).x)
+        .attr("y1", d => (d.source as any).y)
+        .attr("x2", d => (d.target as any).x)
+        .attr("y2", d => (d.target as any).y);
+
+      node.attr("transform", d => `translate(${d.x}, ${d.y})`);
+    });
+
+    return () => {
+      simulation.stop();
+    };
+
+  }, [safeNodes, safeEdges]);
+
+  if (safeNodes.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-sm text-slate-400">Knowledge graph is empty.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-full relative bg-slate-900/50 rounded-md" onClick={() => setSelectedNode(null)}>
+      <svg ref={svgRef} width="100%" height="100%"></svg>
+      <NodeInspector node={selectedNode} onClose={() => setSelectedNode(null)} knowledgeGraph={knowledgeGraph} memoryDB={memoryDB} />
+    </div>
+  );
 };
 
 export default KnowledgeGraphViewer;

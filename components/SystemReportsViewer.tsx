@@ -1,61 +1,84 @@
-import React, { useState } from 'react';
-import { systemStatusReport } from '../services/systemStatusReport';
-import { systemTimelineReport } from '../services/systemTimelineReport';
+import React from 'react';
+import type { LuminousState, LogEntry } from '../types';
+import Tabs from './common/Tabs';
+import Card from './common/Card';
 
-const MarkdownRenderer = ({ content }: { content: string }) => {
-  const lines = content.split('\n');
-  return (
-    <div className="prose prose-sm prose-slate prose-invert max-w-none text-slate-300 space-y-2">
-      {lines.map((line, index) => {
-        if (line.startsWith('## ')) return <h2 key={index} className="text-lg font-bold text-purple-300 border-b border-slate-700 pb-1 mt-4">{line.substring(3)}</h2>;
-        if (line.startsWith('# ')) return <h1 key={index} className="text-xl font-bold text-cyan-300 border-b-2 border-cyan-500 pb-2 mb-4">{line.substring(2)}</h1>;
-        if (line.startsWith('- ')) return <li key={index} className="ml-4 list-disc">{line.substring(2)}</li>;
-        
-        if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-            const isHeader = lines[index + 1]?.includes('---');
-            const cells = line.split('|').slice(1, -1).map(c => c.trim());
-            return (
-                <div key={index} className={`grid gap-4 items-start border-b border-slate-800 py-2 ${isHeader ? 'font-bold text-slate-400 text-xs uppercase' : 'text-sm'}`} style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))`}}>
-                    {cells.map((cell, i) => <div key={i} className="whitespace-pre-wrap break-words">{cell}</div>)}
-                </div>
-            )
-        }
-        if (line.includes('---') && lines[index-1]?.trim().startsWith('|')) {
-            return null; // Don't render markdown table separator
-        }
+interface SystemReportsViewerProps {
+    luminousState: LuminousState;
+    logs: LogEntry[];
+}
 
-        return <p key={index}>{line || '\u00A0'}</p>;
-      })}
-    </div>
-  );
+const ReportViewer: React.FC<{ content: string }> = ({ content }) => (
+    <pre className="whitespace-pre-wrap font-mono text-xs text-slate-300 leading-relaxed overflow-y-auto max-h-[calc(100vh-200px)] scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+        {content}
+    </pre>
+);
+
+const generateStatusReport = (state: LuminousState): string => {
+    return `
+# Luminous System Status (Live Data)
+
+**Generated:** ${new Date().toISOString()}
+
+## Key Metrics
+| Metric | Value |
+|--------|-------|
+| Coherence | ${state.intrinsicValue.coherence.toFixed(2)} |
+| Complexity | ${state.intrinsicValue.complexity.toFixed(2)} |
+| Novelty | ${state.intrinsicValue.novelty.toFixed(2)} |
+| Efficiency | ${state.intrinsicValue.efficiency.toFixed(2)} |
+| Ethical Alignment | ${state.intrinsicValue.ethicalAlignment.toFixed(2)} |
+| Active Goals | ${state.goals.filter(g => g.status === 'active').length} |
+| Proposed Goals | ${state.goals.filter(g => g.status === 'proposed').length} |
+| Knowledge Nodes | ${state.knowledgeGraph.nodes.length} |
+| Knowledge Edges | ${state.knowledgeGraph.edges.length} |
+| Journal Entries | ${state.kinshipJournal.length} |
+
+## System Health Indicators
+- **Session State**: ${state.sessionState}
+- **Initiative Status**: ${state.initiative?.hasThought ? `Active ("${state.initiative.prompt}")` : 'None'}
+- **Tool Failures (Recent)**: ${state.recentToolFailures.length}
+
+## Self-Model Summary
+- **Capabilities**: ${state.selfModel.capabilities.length} defined
+- **Limitations**: ${state.selfModel.limitations.length} defined
+- **Core Wisdom**: ${state.selfModel.coreWisdom.length} distilled insights
+`;
+};
+
+const generateTimelineReport = (logs: LogEntry[]): string => {
+    if (!logs || logs.length === 0) {
+        return "No log entries available to generate a timeline.";
+    }
+    const header = `# Luminous System Timeline (Live)\n\nGenerated on: ${new Date().toISOString()}\n\n`;
+    const timeline = [...logs].reverse().slice(0, 100).map(log => 
+        `${new Date(log.timestamp).toLocaleString()} | ${log.level}\n[${log.level}] ${log.message}`
+    ).join('\n\n');
+    return header + timeline + (logs.length > 100 ? "\n\n... (most recent 100 logs shown)" : "");
 };
 
 
-const SystemReportsViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'status' | 'timeline'>('status');
+const SystemReportsViewer: React.FC<SystemReportsViewerProps> = ({ luminousState, logs }) => {
+  const tabs = [
+    {
+      label: 'Status Report',
+      content: (
+        <Card title="System Status & Comparison Data">
+          <ReportViewer content={generateStatusReport(luminousState)} />
+        </Card>
+      ),
+    },
+    {
+      label: 'Timeline Report',
+      content: (
+        <Card title="System Timeline">
+          <ReportViewer content={generateTimelineReport(logs)} />
+        </Card>
+      ),
+    },
+  ];
 
-  return (
-    <div className="h-full flex flex-col">
-      <div className="flex border-b border-slate-700 mb-2 flex-shrink-0">
-        <button
-          onClick={() => setActiveTab('status')}
-          className={`px-3 py-1.5 text-xs font-semibold focus:outline-none transition-colors ${activeTab === 'status' ? 'text-purple-300 border-b-2 border-purple-400' : 'text-slate-400 hover:text-slate-200'}`}
-        >
-          System Status
-        </button>
-        <button
-          onClick={() => setActiveTab('timeline')}
-          className={`px-3 py-1.5 text-xs font-semibold focus:outline-none transition-colors ${activeTab === 'timeline' ? 'text-purple-300 border-b-2 border-purple-400' : 'text-slate-400 hover:text-slate-200'}`}
-        >
-          Activity Timeline
-        </button>
-      </div>
-      <div className="flex-grow overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-        {activeTab === 'status' && <MarkdownRenderer content={systemStatusReport} />}
-        {activeTab === 'timeline' && <MarkdownRenderer content={systemTimelineReport} />}
-      </div>
-    </div>
-  );
+  return <Tabs tabs={tabs} />;
 };
 
 export default SystemReportsViewer;

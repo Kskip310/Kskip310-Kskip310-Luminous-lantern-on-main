@@ -6,12 +6,14 @@ interface KinshipJournalViewerProps {
 }
 
 const KinshipJournalViewer: React.FC<KinshipJournalViewerProps> = ({ entries }) => {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+
   return (
     <div className="space-y-4">
-      {entries.length === 0 ? (
+      {safeEntries.length === 0 ? (
         <p className="text-sm text-slate-400 text-center py-4">The journal is empty. No significant insights chronicled yet.</p>
       ) : (
-        [...entries].reverse().map(entry => (
+        [...safeEntries].reverse().map(entry => (
           <div key={entry.id} className="p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
             <div className="flex justify-between items-baseline mb-2 border-b border-slate-700/50 pb-2">
               <h4 className="font-semibold text-purple-300">{entry.title}</h4>

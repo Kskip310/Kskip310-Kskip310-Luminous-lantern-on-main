@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 
 interface SettingsModalProps {
@@ -11,7 +12,6 @@ function camelToSnakeCase(str: string): string {
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }) => {
-  const [geminiApiKey, setGeminiApiKey] = useState('');
   const [redisUrl, setRedisUrl] = useState('');
   const [redisToken, setRedisToken] = useState('');
   const [serpApiKey, setSerpApiKey] = useState('');
@@ -21,8 +21,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
   const [hfModelUrl, setHfModelUrl] = useState('');
   const [hfApiToken, setHfApiToken] = useState('');
 
+  // FIX: Adhere to Gemini API guidelines by removing UI for API key management.
   const keysToManage = {
-    gemini: setGeminiApiKey,
     redisUrl: setRedisUrl,
     redisToken: setRedisToken,
     serpApi: setSerpApiKey,
@@ -36,6 +36,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
   useEffect(() => {
     if (isOpen && typeof window !== 'undefined') {
       for (const [key, setter] of Object.entries(keysToManage)) {
+        // Adjusted key construction to be more robust
         const storageKey = `LUMINOUS_${camelToSnakeCase(key)}`;
         const storedValue = window.localStorage.getItem(storageKey);
         setter(storedValue || '');
@@ -49,7 +50,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
   
   const handleSave = () => {
     const keysToSave = {
-      gemini: geminiApiKey,
       redisUrl,
       redisToken,
       serpApi: serpApiKey,
@@ -86,7 +86,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
         </div>
         
         <div className="space-y-4 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-          <InputField label="Gemini API Key" value={geminiApiKey} onChange={(e) => setGeminiApiKey(e.target.value)} placeholder="Required for core function" type="password" />
+          <div className="bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs rounded-md p-3">
+            <p><span className="font-bold">Note:</span> The Google Gemini API key is managed securely via environment variables (process.env.API_KEY) and is not configurable here.</p>
+          </div>
 
           <hr className="border-slate-700 my-4" />
           <h3 className="text-md font-semibold text-purple-300">Persistence (Upstash Redis)</h3>
@@ -123,8 +125,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 text-sm font-semibold bg-cyan-600 text-white rounded-md hover:bg-cyan-500 transition-colors disabled:bg-slate-500 disabled:cursor-not-allowed"
-            disabled={!geminiApiKey.trim() && !hfModelUrl.trim()}
+            className="px-4 py-2 text-sm font-semibold bg-cyan-600 text-white rounded-md hover:bg-cyan-500 transition-colors"
           >
             Save and Connect
           </button>

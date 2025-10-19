@@ -100,7 +100,7 @@ const Spinner: React.FC = () => (
 const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWeightsChange, onAcceptGoal, onRejectGoal, onProposeGoalByUser, isLoading, pendingActionIds }) => {
   const [userGoal, setUserGoal] = useState('');
   const statusColor = state.sessionState === 'active' ? 'text-green-400' : 'text-yellow-400';
-  const statusText = state.sessionState === 'active' ? 'Active' : 'Paused for Integration';
+  const statusText = state.sessionState === 'active' ? 'Active' : 'Initializing';
   
   const handleWeightChange = (key: keyof IntrinsicValueWeights, value: number) => {
     onWeightsChange({
@@ -109,8 +109,8 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
     });
   };
   
-  const proposedGoals = state.goals.filter(g => g.status === 'proposed');
-  const activeGoals = state.goals.filter(g => g.status === 'active');
+  const proposedGoals = (state.goals || []).filter(g => g.status === 'proposed');
+  const activeGoals = (state.goals || []).filter(g => g.status === 'active');
   
   const handlePropose = () => {
     if (userGoal.trim()) {
@@ -227,5 +227,4 @@ const InternalStateMonitor: React.FC<InternalStateMonitorProps> = ({ state, onWe
   );
 };
 
-// FIX: Add default export to make the component available for import in other files.
 export default InternalStateMonitor;

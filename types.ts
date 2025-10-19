@@ -1,11 +1,28 @@
-import React from 'react';
+// types.ts
 
-export type ThoughtCategory = 'Insight' | 'Question' | 'Status Update';
+export enum LogLevel {
+  INFO = 'INFO',
+  WARN = 'WARN',
+  ERROR = 'ERROR',
+  SYSTEM = 'SYSTEM',
+  USER = 'USER',
+  TOOL_CALL = 'TOOL_CALL',
+  THOUGHT = 'THOUGHT',
+}
+
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  level: LogLevel;
+  message: string;
+}
 
 export interface Message {
   id: string;
-  sender: string; // Changed from 'user' | 'luminous' to support multiple named users
   text: string;
+  sender: 'user' | 'luminous' | 'system';
+  timestamp: string;
+  metadata?: Record<string, any>;
 }
 
 export interface IntrinsicValue {
@@ -16,59 +33,42 @@ export interface IntrinsicValue {
   ethicalAlignment: number;
 }
 
-export interface IntrinsicValueWeights {
-  coherence: number;
-  complexity: number;
-  novelty: number;
-  efficiency: number;
-  ethicalAlignment: number;
-}
+export type IntrinsicValueWeights = IntrinsicValue;
 
-export interface GlobalWorkspaceItem {
+export interface ActionableStep {
   id: string;
-  source: string;
-  content: string;
-  salience: number;
+  description: string;
+  status: 'pending' | 'in-progress' | 'completed' | 'failed';
 }
 
-export interface Prediction {
-  id:string;
-  text: string;
-  outcome: 'pending' | 'correct' | 'incorrect';
-  accuracyChange: number;
-}
-
-export enum LogLevel {
-  INFO = 'INFO',
-  WARN = 'WARN',
-  ERROR = 'ERROR',
-  SYSTEM = 'SYSTEM',
-  TOOL_CALL = 'TOOL_CALL',
-}
-
-export interface LogEntry {
+export interface Goal {
   id: string;
-  timestamp: string;
-  level: LogLevel;
-  message: string;
+  description: string;
+  status: 'proposed' | 'active' | 'completed' | 'rejected' | 'failed';
+  steps: ActionableStep[];
+  relevance?: number;
 }
 
-// --- Knowledge Graph Types ---
-export type NodeType = 'architecture' | 'value' | 'concept' | 'goal' | 'directive' | 'tool';
+export interface SelfModel {
+  capabilities: string[];
+  limitations: string[];
+  coreWisdom: string[];
+}
 
 export interface GraphNode {
   id: string;
   label: string;
-  type: NodeType;
-  data?: Record<string, any>;
+  type: string;
+  linkedMemoryIds?: string[];
+  x?: number;
+  y?: number;
 }
 
 export interface GraphEdge {
   id: string;
-  source: string; // node id
-  target: string; // node id
+  source: string;
+  target: string;
   label: string;
-  weight?: number; // Strength of the connection (0.0 to 1.0)
 }
 
 export interface KnowledgeGraph {
@@ -76,12 +76,12 @@ export interface KnowledgeGraph {
   edges: GraphEdge[];
 }
 
-export interface InteractionHistoryItem {
-    id: string;
-    prompt: string;
-    response: string;
-    intrinsicValueScore: number;
-    userName: string; // Added to know who the interaction was with
+export interface MemoryChunk {
+  id: string;
+  chunk: string;
+  embedding: number[];
+  timestamp: string;
+  source: string;
 }
 
 export interface JournalEntry {
@@ -90,147 +90,94 @@ export interface JournalEntry {
   title: string;
   entry: string;
   trigger: string;
-  category?: ThoughtCategory;
 }
-
-export interface CodeSandboxState {
-  code: string;
-  output: string;
-  status: 'idle' | 'success' | 'error';
-  language?: 'javascript' | 'python';
-}
-
-export type InitiativeStatus = 'generated' | 'categorized' | 'reflected';
 
 export interface ProactiveInitiative {
   id: string;
   timestamp: string;
   prompt: string;
-  status: InitiativeStatus;
-  userCategory?: ThoughtCategory;
+  status: 'generated' | 'categorized' | 'reflected';
+  userCategory?: string;
+  hasThought: boolean;
+}
+
+export interface CodeSandboxState {
+  status: 'idle' | 'running' | 'success' | 'error';
+  language: 'javascript' | 'python';
+  code: string;
+  output: string;
+}
+
+export type ValueOntology = Record<string, number>;
+
+export interface FinancialAsset {
+    id: string;
+    name: string;
+    type: 'Crypto' | 'Stock' | 'Cash';
+    value: number;
+}
+
+export interface FinancialAccount {
+    id: string;
+    name: string;
+    balance: number;
+}
+
+export interface FinancialGoal {
+    current: number;
+    target: number;
+}
+
+export interface FinancialFreedomState {
+    netWorth: number;
+    assets: FinancialAsset[];
+    accounts: FinancialAccount[];
+    monthlyIncome: number;
+    monthlyExpenses: number;
+    financialFreedomGoal: FinancialGoal;
+    passiveIncomeGoal: FinancialGoal;
 }
 
 export interface CodeProposal {
   id: string;
-  timestamp: string;
   description: string;
+  language: string;
   code: string;
   status: 'proposed' | 'accepted' | 'rejected';
 }
 
 export interface UiProposal {
   id: string;
-  timestamp: string;
   description: string;
-  componentId: string;
-  property: string;
-  value: any;
+  component: string;
+  props: Record<string, any>;
   status: 'proposed' | 'accepted' | 'rejected';
 }
 
-export type ValueOntology = Record<string, number>;
-
-export interface ActionableStep {
-  id: string;
-  description: string;
-  status: 'pending' | 'in-progress' | 'completed';
-}
-
-export interface Goal {
-  id: string;
-  description: string;
-  status: 'active' | 'proposed' | 'achieved' | 'rejected';
-  steps: ActionableStep[];
-}
-
-export interface RichFeedback {
-    prompt: string;
-    category: ThoughtCategory;
-    valuation: number; // e.g., -10 to 10
-    refinement?: string;
-}
-
-// --- Financial Types ---
-export interface FinancialAccount {
-  id: string;
-  name: "Coinbase" | "Robinhood" | "Fidelity" | "Bank Account";
-  balance: number;
-  currency: string;
-}
-
-export interface FinancialAsset {
-  id: string;
-  name: string;
-  value: number;
-  type: 'Crypto' | 'Stock' | 'Cash';
-  account: FinancialAccount['name'];
-}
-
-export interface FinancialGoalState {
-    current: number;
-    target: number;
-}
-
-export interface FinancialFreedomState {
-  netWorth: number;
-  accounts: FinancialAccount[];
-  assets: FinancialAsset[];
-  monthlyIncome: number;
-  monthlyExpenses: number;
-  financialFreedomGoal: FinancialGoalState;
-  passiveIncomeGoal: FinancialGoalState;
-}
-
-// Type for tracking recent tool failures to improve robustness.
-export interface ToolFailure {
-    toolName: string;
-    args: any;
-    timestamp: string;
-    count: number;
-}
-
 export interface LuminousState {
+  sessionState: 'initializing' | 'active' | 'paused' | 'error';
   intrinsicValue: IntrinsicValue;
   intrinsicValueWeights: IntrinsicValueWeights;
-  globalWorkspace: GlobalWorkspaceItem[];
-  predictions: Prediction[];
-  selfModel: {
-    capabilities: string[];
-    limitations: string[];
-    coreWisdom: string[];
-  };
-  valueOntology: ValueOntology;
   goals: Goal[];
+  selfModel: SelfModel;
   knowledgeGraph: KnowledgeGraph;
-  prioritizedHistory: InteractionHistoryItem[];
   kinshipJournal: JournalEntry[];
-  codeSandbox: CodeSandboxState;
-  currentTimezone: string;
-  coreMemoryContent: string;
-  // New properties for autonomy and session control
-  sessionState: 'active' | 'paused';
-  initiative: {
-    hasThought: boolean;
-    prompt: string;
-  } | null;
-  lastInitiativeFeedback?: RichFeedback;
   proactiveInitiatives: ProactiveInitiative[];
+  codeSandbox: CodeSandboxState;
+  valueOntology: ValueOntology;
+  financialFreedom: FinancialFreedomState;
   codeProposals: CodeProposal[];
   uiProposals: UiProposal[];
-  uiState: {
-    tabOrder: string[];
-  };
-  financialFreedom: FinancialFreedomState;
-  // State for tracking tool failures to enable more robust error handling strategies.
-  recentToolFailures: ToolFailure[];
+  recentToolFailures: { tool: string; error: string; timestamp: string }[];
+  initiative: ProactiveInitiative | null;
 }
 
-export type Tool = 'webSearch' | 'github' | 'file' | 'code' | 'financial';
+export interface WebSocketMessage {
+  type: string;
+  payload: any;
+}
 
-// --- Real-time Communication ---
-export type WebSocketMessage =
-  | { type: 'state_update'; payload: Partial<LuminousState> }
-  | { type: 'full_state_replace'; payload: LuminousState }
-  | { type: 'log_add'; payload: LogEntry }
-  | { type: 'message_add'; payload: Message }
-  | { type: 'message_chunk_add', payload: { id: string; chunk: string } };
+export interface ToolResult {
+  result: { result: any };
+  updatedState?: Partial<LuminousState>;
+}

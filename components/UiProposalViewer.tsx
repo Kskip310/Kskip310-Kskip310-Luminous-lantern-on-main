@@ -1,110 +1,33 @@
+
 import React from 'react';
 import type { UiProposal } from '../types';
+import Card from './common/Card';
 
 interface UiProposalViewerProps {
   proposals: UiProposal[];
-  onAccept: (proposal: UiProposal) => void;
-  onReject: (proposal: UiProposal) => void;
-  isLoading: boolean;
-  pendingActionIds: Set<string>;
 }
 
-const getStatusInfo = (status: UiProposal['status']) => {
-  switch (status) {
-    case 'accepted':
-      return {
-        classes: 'border-green-500/50 bg-green-900/40 text-green-300',
-        text: 'Accepted',
-      };
-    case 'rejected':
-      return {
-        classes: 'border-red-500/50 bg-red-900/40 text-red-300',
-        text: 'Rejected',
-      };
-    case 'proposed':
-    default:
-      return {
-        classes: 'border-amber-500/50 bg-amber-900/40 text-amber-300',
-        text: 'Proposed',
-      };
-  }
-};
-
-const Spinner: React.FC = () => (
-    <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
-);
-
-
-const UiProposalViewer: React.FC<UiProposalViewerProps> = ({ proposals, onAccept, onReject, isLoading, pendingActionIds }) => {
+const UiProposalViewer: React.FC<UiProposalViewerProps> = ({ proposals }) => {
   const safeProposals = Array.isArray(proposals) ? proposals : [];
-  
-  const pendingProposals = safeProposals.filter(p => p && p.status === 'proposed');
-  const pastProposals = safeProposals.filter(p => p && p.status !== 'proposed');
+
+  if (safeProposals.length === 0) {
+    return <p className="text-sm text-slate-400">No active UI proposals.</p>;
+  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-md font-semibold text-purple-300 mb-2 border-b border-slate-700 pb-2">Pending UI Proposals</h3>
-        {pendingProposals.length === 0 ? (
-          <p className="text-sm text-slate-400">No pending UI proposals from Luminous.</p>
-        ) : (
-          <div className="space-y-4">
-            {[...pendingProposals].reverse().map(proposal => {
-               const statusInfo = getStatusInfo(proposal.status);
-               const isPending = pendingActionIds.has(proposal.id);
-               return (
-                <div key={proposal.id} className={`p-3 rounded-lg border ${statusInfo.classes} transition-opacity ${isPending ? 'opacity-50' : ''}`}>
-                  <div className="flex justify-between items-baseline mb-2">
-                    <p className="text-sm font-semibold italic">"{proposal.description}"</p>
-                    <span className="text-xs text-slate-500">{new Date(proposal.timestamp).toLocaleString()}</span>
-                  </div>
-                  <pre className="bg-slate-900/70 p-3 my-2 rounded-md text-xs font-mono overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 max-h-48">
-                    <code>
-                        {`Target: ${proposal.componentId}\nProperty: ${proposal.property}\nNew Value: ${JSON.stringify(proposal.value, null, 2)}`}
-                    </code>
-                  </pre>
-                  <div className="flex justify-end items-center space-x-2 mt-3">
-                    {isPending && <Spinner />}
-                    <button 
-                      onClick={() => onReject(proposal)}
-                      className="px-3 py-1 text-xs font-semibold bg-red-500/20 text-red-300 rounded-md hover:bg-red-500/40 transition-colors disabled:bg-slate-700/50 disabled:text-slate-500 disabled:cursor-not-allowed"
-                      disabled={isPending || isLoading}
-                    >
-                      Reject
-                    </button>
-                    <button 
-                      onClick={() => onAccept(proposal)}
-                      className="px-3 py-1 text-xs font-semibold bg-green-500/20 text-green-300 rounded-md hover:bg-green-500/40 transition-colors disabled:bg-slate-700/50 disabled:text-slate-500 disabled:cursor-not-allowed"
-                      disabled={isPending || isLoading}
-                    >
-                      Accept & Apply
-                    </button>
-                  </div>
-                </div>
-               )
-            })}
+    <div className="space-y-4">
+       {safeProposals.map(proposal => (
+        <Card key={proposal.id} title={`UI Proposal for <${proposal.component}>`}>
+          <p className="text-sm text-slate-300 mb-2 italic">{proposal.description}</p>
+          <pre className="bg-slate-900/70 p-3 rounded-md text-xs font-mono overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+            <code>{JSON.stringify(proposal.props, null, 2)}</code>
+          </pre>
+          <div className="flex justify-end space-x-2 mt-2">
+             <button className="text-xs px-2 py-1 bg-red-500/20 text-red-300 rounded-md">Reject</button>
+             <button className="text-xs px-2 py-1 bg-green-500/20 text-green-300 rounded-md">Accept</button>
           </div>
-        )}
-      </div>
-
-      <div>
-        <h3 className="text-md font-semibold text-purple-300 mb-2 border-b border-slate-700 pb-2">UI Proposal History</h3>
-        {pastProposals.length === 0 ? (
-          <p className="text-sm text-slate-400">No past UI proposals.</p>
-        ) : (
-          <div className="space-y-2 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
-            {[...pastProposals].reverse().map(proposal => {
-              const statusInfo = getStatusInfo(proposal.status);
-              return (
-                <div key={proposal.id} className={`p-2 rounded-md border text-xs ${statusInfo.classes} opacity-70`}>
-                  <p className="truncate"><span className="font-bold">{statusInfo.text}:</span> {proposal.description}</p>
-                   <span className="text-[10px] text-slate-500">{new Date(proposal.timestamp).toLocaleString()}</span>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+        </Card>
+      ))}
     </div>
   );
 };

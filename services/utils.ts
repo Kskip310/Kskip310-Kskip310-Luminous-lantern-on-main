@@ -1,3 +1,4 @@
+
 // services/utils.ts
 
 export const isObject = (obj: any): obj is object => obj && typeof obj === 'object' && !Array.isArray(obj);
@@ -15,4 +16,12 @@ export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
     });
   }
   return output;
+}
+
+// FIX: Add a UUID generator to be used for creating unique IDs without external libraries.
+export function uuidv4(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }

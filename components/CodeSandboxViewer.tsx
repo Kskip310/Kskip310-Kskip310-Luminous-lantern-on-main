@@ -104,8 +104,6 @@ const CodeSandboxViewer: React.FC<CodeSandboxViewerProps> = ({ sandboxState, onS
               const document = undefined;
               const self = undefined;
               const globalThis = undefined;
-              const fetch = () => Promise.reject(new Error('fetch is disabled in this sandbox.'));
-              const XMLHttpRequest = undefined;
               
               // User code is executed inside this async IIFE
               ${userCode.javascript}
