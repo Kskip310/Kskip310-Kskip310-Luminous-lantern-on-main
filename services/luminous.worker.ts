@@ -1,10 +1,11 @@
+
 // services/luminous.worker.ts
 
 import { LuminousService } from './luminousService';
 import { DBService } from './dbService';
 import { ToolService } from './toolService';
 import { broadcastLog } from './broadcastService';
-import { LogLevel } from '../types';
+import { LogLevel, Message } from '../types';
 
 let luminousService: LuminousService | null = null;
 const MAX_HISTORY_FOR_WORKER_CONTEXT = 50;
@@ -45,7 +46,7 @@ self.onmessage = async (event: MessageEvent) => {
             broadcastLog(LogLevel.SYSTEM, 'Luminous worker initialized successfully.');
 
         } else if (type === 'user_message' && luminousService) {
-            await luminousService.handleUserMessage(payload);
+            await luminousService.handleUserMessage(payload as Message);
         } else if (!luminousService) {
             broadcastLog(LogLevel.WARN, 'Worker received a message before it was initialized.');
         }

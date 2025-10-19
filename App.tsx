@@ -85,7 +85,9 @@ const App: React.FC = () => {
         }
 
         // Initialize the Web Worker
-        const worker = new Worker(new URL('./services/luminous.worker.ts', import.meta.url), {
+        // FIX: The `new URL(...)` constructor can fail in some environments.
+        // Passing the path as a string is more robust and relies on the bundler to resolve it.
+        const worker = new Worker('./services/luminous.worker.ts', {
             type: 'module',
         });
         workerRef.current = worker;
@@ -163,8 +165,8 @@ const App: React.FC = () => {
         setIsThinking(true);
         const userMessage: Message = { id: uuidv4(), text, sender: 'user', timestamp: new Date().toISOString() };
         setMessages(prev => [...prev, userMessage]);
-        // Send message to the worker
-        workerRef.current.postMessage({ type: 'user_message', payload: text });
+        // Send message object to the worker
+        workerRef.current.postMessage({ type: 'user_message', payload: userMessage });
     };
     
     const handleLoadMoreMessages = async () => {

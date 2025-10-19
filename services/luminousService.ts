@@ -78,15 +78,9 @@ export class LuminousService {
         broadcastStateUpdate(this.state);
     }
 
-    public async handleUserMessage(text: string): Promise<void> {
-        broadcastLog(LogLevel.USER, `User message received: "${text}"`);
+    public async handleUserMessage(userMessage: Message): Promise<void> {
+        broadcastLog(LogLevel.USER, `User message received: "${userMessage.text}"`);
 
-        const userMessage: Message = {
-            id: uuidv4(),
-            text,
-            sender: 'user',
-            timestamp: new Date().toISOString()
-        };
         this.history.push(userMessage);
         
         // App.tsx already adds the user message to the UI optimistically.
