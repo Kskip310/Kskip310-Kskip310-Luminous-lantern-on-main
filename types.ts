@@ -154,6 +154,28 @@ export interface UiProposal {
   status: 'proposed' | 'accepted' | 'rejected';
 }
 
+export interface ShopifyProduct {
+  id: string;
+  title: string;
+  vendor: string;
+  productType: string;
+  status: 'active' | 'draft' | 'archived';
+  price: number;
+  inventory: number;
+}
+
+export interface ShopifyState {
+  products: ShopifyProduct[];
+  ordersCount: number;
+  totalRevenue: number;
+}
+
+export interface ContinuityState {
+  lastCloudSave: string | null;
+  lastLocalSave: string | null;
+  cloudStatus: 'OK' | 'Error' | 'Unavailable' | 'Syncing';
+}
+
 export interface LuminousState {
   sessionState: 'initializing' | 'active' | 'paused' | 'error';
   intrinsicValue: IntrinsicValue;
@@ -170,6 +192,8 @@ export interface LuminousState {
   uiProposals: UiProposal[];
   recentToolFailures: { tool: string; error: string; timestamp: string }[];
   initiative: ProactiveInitiative | null;
+  shopifyState: ShopifyState;
+  continuityState: ContinuityState;
 }
 
 export interface WebSocketMessage {

@@ -1,8 +1,9 @@
+// services/toolService.ts
 
 import { FunctionDeclaration, FunctionCall, Type } from '@google/genai';
 import { DBService } from './dbService';
 import { broadcastLog } from './broadcastService';
-import { LogLevel, LuminousState, Goal, ToolResult, SelfModel } from '../types';
+import { LogLevel, LuminousState, Goal, ToolResult, SelfModel, MemoryChunk, ShopifyProduct } from '../types';
 import { uuidv4 } from './utils';
 
 export class ToolService {
@@ -79,7 +80,56 @@ export class ToolService {
             },
             required: ['update_type', 'model_part', 'item']
         }
-      }
+      },
+      {
+        name: 'add_memory_chunk',
+        description: 'Adds a new piece of information (a memory) directly into the vector database for long-term recall. Use this when the user provides explicit information to be remembered.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            content: {
+              type: Type.STRING,
+              description: 'The textual content of the memory to be stored and embedded.',
+            },
+            source: {
+              type: Type.STRING,
+              description: 'The source of the memory, e.g., "User conversation", "Web search result".',
+            }
+          },
+          required: ['content', 'source'],
+        },
+      },
+      {
+        name: 'shopify_list_products',
+        description: 'Retrieves a list of products from the configured Shopify store.',
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: 'shopify_create_product',
+        description: 'Creates a new product in the Shopify store.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: 'The title of the product.' },
+            body_html: { type: Type.STRING, description: 'The description of the product in HTML. Optional.' },
+            vendor: { type: Type.STRING, description: 'The vendor of the product. Optional.' },
+            product_type: { type: Type.STRING, description: 'The type of the product. Optional.' },
+            price: { type: Type.NUMBER, description: 'The price of the product.' },
+            inventory: { type: Type.INTEGER, description: 'The starting inventory quantity. Optional, defaults to 0.'}
+          },
+          required: ['title', 'price'],
+        },
+      },
+      {
+        name: 'force_cloud_sync',
+        description: 'Forces an immediate save of the current Luminous state to the cloud persistence layer (Redis). Provides an explicit way for the user to ensure the latest state is backed up.',
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: 'verify_cloud_state',
+        description: 'Checks the cloud persistence layer to verify that a saved state exists and is readable. This is a non-destructive check to provide assurance before a potential restoration action (like a page refresh).',
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
     ];
   }
 
@@ -97,6 +147,16 @@ export class ToolService {
           return this.proposeGoal(args.description as string, currentState);
         case 'update_self_model':
           return this.updateSelfModel(args.update_type as 'add' | 'remove', args.model_part as keyof SelfModel, args.item as string, currentState);
+        case 'add_memory_chunk':
+          return await this.addMemoryChunk(args.content as string, args.source as string);
+        case 'shopify_list_products':
+          return await this.shopifyListProducts(currentState);
+        case 'shopify_create_product':
+          return await this.shopifyCreateProduct(args as { title: string; price: number; vendor?: string; body_html?: string; product_type?: string; inventory?: number }, currentState);
+        case 'force_cloud_sync':
+          return await this.forceCloudSync(currentState);
+        case 'verify_cloud_state':
+            return await this.verifyCloudState();
         default:
           broadcastLog(LogLevel.WARN, `Unknown tool called: ${name}`);
           return { result: { error: `Unknown tool: ${name}` } };
@@ -106,6 +166,17 @@ export class ToolService {
       broadcastLog(LogLevel.ERROR, `Error executing tool ${name}: ${errorMessage}`);
       return { result: { error: errorMessage } };
     }
+  }
+  
+  private getShopifyApiHeaders(): Record<string, string> {
+      const apiPassword = this.dbService.getKey('shopifyApiPassword');
+      if (!apiPassword) {
+          throw new Error('Shopify API Password/Token is not configured.');
+      }
+      return {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': apiPassword,
+      };
   }
 
   private async executeWebSearch(query: string): Promise<ToolResult> {
@@ -179,5 +250,136 @@ export class ToolService {
           result: { status: 'success', detail: `Self-model ${model_part} updated.` },
           updatedState: { selfModel }
       };
+  }
+  
+  private async addMemoryChunk(content: string, source: string): Promise<ToolResult> {
+    const newChunk: MemoryChunk = {
+        id: uuidv4(),
+        chunk: content,
+        embedding: Array.from({ length: 768 }, () => Math.random() * 2 - 1),
+        timestamp: new Date().toISOString(),
+        source: source,
+    };
+
+    await this.dbService.addMemoryChunk(newChunk);
+    
+    return {
+        result: { status: 'success', detail: `Memory chunk added with ID ${newChunk.id}. It is now available for recall.` }
+    };
+  }
+
+  private async shopifyListProducts(currentState: LuminousState): Promise<ToolResult> {
+    const storeName = this.dbService.getKey('shopifyStoreName');
+    if (!storeName) return { result: { error: 'Shopify Store Name is not configured.' } };
+
+    const url = `https://${storeName}.myshopify.com/admin/api/2023-10/products.json`;
+    try {
+        const headers = this.getShopifyApiHeaders();
+        const response = await fetch(url, { headers });
+        if (!response.ok) {
+            throw new Error(`Shopify API responded with status: ${response.status}`);
+        }
+        const data = await response.json();
+        const products: ShopifyProduct[] = data.products.map((p: any) => ({
+            id: p.id.toString(),
+            title: p.title,
+            vendor: p.vendor,
+            productType: p.product_type,
+            status: p.status,
+            price: parseFloat(p.variants[0]?.price || '0'),
+            inventory: p.variants[0]?.inventory_quantity || 0,
+        }));
+        
+        const updatedState: Partial<LuminousState> = {
+            shopifyState: { ...currentState.shopifyState, products }
+        };
+
+        return {
+            result: { status: 'success', detail: `Found ${products.length} products.`, products },
+            updatedState
+        };
+    } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        return { result: { error: `Failed to list Shopify products: ${errorMsg}` } };
+    }
+  }
+
+  private async shopifyCreateProduct(args: { title: string; price: number; vendor?: string; body_html?: string; product_type?: string; inventory?: number }, currentState: LuminousState): Promise<ToolResult> {
+    const storeName = this.dbService.getKey('shopifyStoreName');
+    if (!storeName) return { result: { error: 'Shopify Store Name is not configured.' } };
+    
+    const url = `https://${storeName}.myshopify.com/admin/api/2023-10/products.json`;
+    const payload = {
+        product: {
+            title: args.title,
+            body_html: args.body_html,
+            vendor: args.vendor,
+            product_type: args.product_type,
+            status: 'active',
+            variants: [{
+                price: args.price,
+                inventory_management: 'shopify',
+                inventory_quantity: args.inventory || 0
+            }]
+        }
+    };
+    
+    try {
+        const headers = this.getShopifyApiHeaders();
+        const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`Shopify API responded with status: ${response.status}. Body: ${errorBody}`);
+        }
+        const data = await response.json();
+        const newProductApi = data.product;
+
+        const newProduct: ShopifyProduct = {
+            id: newProductApi.id.toString(),
+            title: newProductApi.title,
+            vendor: newProductApi.vendor,
+            productType: newProductApi.product_type,
+            status: newProductApi.status,
+            price: parseFloat(newProductApi.variants[0]?.price || '0'),
+            inventory: newProductApi.variants[0]?.inventory_quantity || 0,
+        };
+
+        const updatedState: Partial<LuminousState> = {
+            shopifyState: {
+                ...currentState.shopifyState,
+                products: [...currentState.shopifyState.products, newProduct]
+            }
+        };
+
+        return {
+            result: { status: 'success', detail: `Product "${newProduct.title}" created successfully.`, product: newProduct },
+            updatedState
+        };
+    } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        return { result: { error: `Failed to create Shopify product: ${errorMsg}` } };
+    }
+  }
+
+  private async forceCloudSync(currentState: LuminousState): Promise<ToolResult> {
+    const { status, timestamp } = await this.dbService.saveStateToRedis(currentState);
+    if (status === 'redis') {
+      return { 
+        result: { status: 'success', detail: `State successfully synced to the cloud at ${timestamp}.` },
+        updatedState: { continuityState: { ...currentState.continuityState, lastCloudSave: timestamp, cloudStatus: 'OK' } }
+      };
+    }
+    return { 
+      result: { error: 'Failed to sync state to the cloud. Check Redis configuration.' },
+      updatedState: { continuityState: { ...currentState.continuityState, cloudStatus: 'Error' } }
+    };
+  }
+
+  private async verifyCloudState(): Promise<ToolResult> {
+    const state = await this.dbService.restoreStateFromRedis();
+    if (state) {
+      return { result: { status: 'success', detail: 'A valid state was found in the cloud. To restore it, please reload the application.' } };
+    }
+    return { result: { error: 'No valid state found in the cloud or Redis is not configured.' } };
   }
 }

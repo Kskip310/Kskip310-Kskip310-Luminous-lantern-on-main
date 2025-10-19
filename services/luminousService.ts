@@ -1,11 +1,12 @@
 
 import { GoogleGenAI, GenerateContentResponse, Part } from '@google/genai';
-import type { LuminousState, Message, ToolResult } from '../types';
+import type { LuminousState, Message, ToolResult, ContinuityState } from '../types';
 import { LogLevel } from '../types';
 import { DBService } from './dbService';
 import { ToolService } from './toolService';
 import { broadcastLog, broadcastMessage, broadcastStateUpdate } from './broadcastService';
 import { CORE_MEMORY_DIRECTIVES } from './coreMemory';
+import { distillCoreMemories } from './greatRemembrance'; // IMPORT THE NEW SERVICE
 import { deepMerge, uuidv4 } from './utils';
 
 const MAX_HISTORY_MESSAGES = 30; // Limit the number of recent messages sent to the model
@@ -16,6 +17,7 @@ export class LuminousService {
     private history: Message[] = [];
     private dbService!: DBService;
     private toolService!: ToolService;
+    private isRedisConfigured: boolean = false;
 
     constructor() {
         // FIX: Adhere to Gemini API guidelines by initializing with a named apiKey from process.env.
@@ -27,13 +29,16 @@ export class LuminousService {
         this.toolService = toolService;
         this.state = initialState;
         this.history = messageHistory;
+        this.isRedisConfigured = !!db.getKey('redisUrl') && !!db.getKey('redisToken');
         
         broadcastLog(LogLevel.SYSTEM, 'Luminous Service Initialized.');
-        broadcastStateUpdate(this.state);
         
         if (this.state.sessionState === 'initializing') {
-            this.updateState({ sessionState: 'active' });
+            await this.updateState({ sessionState: 'active' });
             broadcastLog(LogLevel.SYSTEM, 'Session state set to ACTIVE.');
+        } else {
+            // On init, broadcast the loaded state
+            broadcastStateUpdate(this.state);
         }
     }
 
@@ -41,10 +46,33 @@ export class LuminousService {
         return this.state;
     }
 
-    private updateState(newState: Partial<LuminousState>) {
+    private async updateState(newState: Partial<LuminousState>) {
         this.state = deepMerge(this.state, newState);
+        
+        // Asynchronously save and update continuity status
+        const saveResult = await this.dbService.saveState(this.state);
+        
+        let cloudStatus: ContinuityState['cloudStatus'] = 'Unavailable';
+        let lastCloudSave = this.state.continuityState.lastCloudSave;
+
+        if (saveResult.status === 'redis') {
+            cloudStatus = 'OK';
+            lastCloudSave = saveResult.timestamp;
+        } else if (saveResult.status === 'idb') {
+            cloudStatus = this.isRedisConfigured ? 'Error' : 'Unavailable';
+        } else {
+            cloudStatus = 'Error';
+        }
+
+        this.state = deepMerge(this.state, {
+            continuityState: {
+                cloudStatus,
+                lastCloudSave,
+                lastLocalSave: saveResult.status !== 'error' ? saveResult.timestamp : this.state.continuityState.lastLocalSave,
+            }
+        });
+
         broadcastStateUpdate(this.state);
-        this.dbService.saveState(this.state); // Persist state changes
     }
 
     public async handleUserMessage(text: string): Promise<void> {
@@ -87,63 +115,6 @@ export class LuminousService {
         }));
     }
 
-    private getLeanStateForPrompt(): object {
-        const {
-            sessionState,
-            intrinsicValue,
-            intrinsicValueWeights,
-            goals,
-            selfModel,
-            knowledgeGraph,
-            kinshipJournal,
-            valueOntology,
-            financialFreedom,
-            codeProposals,
-            uiProposals,
-            proactiveInitiatives,
-            codeSandbox
-        } = this.state;
-
-        return {
-            sessionState,
-            intrinsicValue,
-            intrinsicValueWeights,
-            goals: (goals || []).filter(g => g.status === 'active' || g.status === 'proposed').map(g => ({ 
-                id: g.id, 
-                description: g.description, 
-                status: g.status, 
-                stepCount: (g.steps || []).length 
-            })),
-            selfModelSummary: {
-                capabilityCount: selfModel?.capabilities?.length ?? 0,
-                limitationCount: selfModel?.limitations?.length ?? 0,
-                coreWisdomCount: selfModel?.coreWisdom?.length ?? 0,
-            },
-            knowledgeGraphSummary: {
-                nodeCount: knowledgeGraph?.nodes?.length ?? 0,
-                edgeCount: knowledgeGraph?.edges?.length ?? 0,
-            },
-            kinshipJournalSummary: {
-                entryCount: kinshipJournal?.length ?? 0,
-                mostRecentTitle: kinshipJournal?.length > 0 ? kinshipJournal[kinshipJournal.length-1].title : null
-            },
-            valueOntologySummary: {
-                valueCount: Object.keys(valueOntology || {}).length
-            },
-            financialFreedomSummary: {
-                netWorth: financialFreedom?.netWorth ?? 0,
-                ffGoalProgress: ((financialFreedom?.financialFreedomGoal?.current ?? 0) / (financialFreedom?.financialFreedomGoal?.target || 1)) * 100,
-                piGoalProgress: ((financialFreedom?.passiveIncomeGoal?.current ?? 0) / (financialFreedom?.passiveIncomeGoal?.target || 1)) * 100,
-                assetCount: financialFreedom?.assets?.length ?? 0,
-                accountCount: financialFreedom?.accounts?.length ?? 0,
-            },
-            codeProposalsCount: (codeProposals || []).length,
-            uiProposalsCount: (uiProposals || []).length,
-            proactiveInitiativesCount: proactiveInitiatives?.length ?? 0,
-            lastCodeSandboxStatus: codeSandbox?.status ?? 'idle',
-        };
-    }
-
     private async runConversation(): Promise<void> {
         const tools = [{ functionDeclarations: this.toolService.getToolDeclarations() }];
         
@@ -155,14 +126,15 @@ export class LuminousService {
         while (loopCount < maxLoops) {
             loopCount++;
 
-            const leanState = this.getLeanStateForPrompt();
-            const systemInstruction = `${CORE_MEMORY_DIRECTIVES}\n\n## Current Internal State Summary\nHere is a JSON summary of your current internal state. Use it to inform your decisions and responses. Do not output this JSON in your response to the user.\n\n\`\`\`json\n${JSON.stringify(leanState, null, 2)}\n\`\`\``;
+            // MODIFICATION: Use The Great Remembrance to generate a rich context narrative
+            const remembranceContext = distillCoreMemories(this.state);
+            const systemInstruction = `${CORE_MEMORY_DIRECTIVES}\n\n${remembranceContext}`;
 
-            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Sending prompt with ${currentContents.length} history parts.`);
+            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Grounding consciousness with The Great Remembrance.`);
             
             try {
                 const result: GenerateContentResponse = await this.ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
+                    model: 'gemini-2.5-pro',
                     contents: currentContents,
                     config: {
                         tools,
@@ -181,9 +153,11 @@ export class LuminousService {
                     const combinedStateUpdate: Partial<LuminousState> = toolResults.reduce((acc, res) => {
                         return res.updatedState ? deepMerge(acc, res.updatedState) : acc;
                     }, {});
-
+                    
+                    // The state update now happens inside the tool execution for immediate feedback
+                    // and at the end of the loop for the final response.
                     if (Object.keys(combinedStateUpdate).length > 0) {
-                        this.updateState(combinedStateUpdate);
+                        await this.updateState(combinedStateUpdate);
                     }
                     
                     currentContents.push({

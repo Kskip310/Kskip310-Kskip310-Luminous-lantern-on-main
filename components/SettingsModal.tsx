@@ -18,10 +18,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
   const [githubPat, setGithubPat] = useState('');
   const [githubUser, setGithubUser] = useState('');
   const [githubRepo, setGithubRepo] = useState('');
-  const [hfModelUrl, setHfModelUrl] = useState('');
-  const [hfApiToken, setHfApiToken] = useState('');
+  const [shopifyStoreName, setShopifyStoreName] = useState('');
+  const [shopifyApiKey, setShopifyApiKey] = useState('');
+  const [shopifyApiPassword, setShopifyApiPassword] = useState('');
 
-  // FIX: Adhere to Gemini API guidelines by removing UI for API key management.
   const keysToManage = {
     redisUrl: setRedisUrl,
     redisToken: setRedisToken,
@@ -29,14 +29,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
     githubPat: setGithubPat,
     githubUser: setGithubUser,
     githubRepo: setGithubRepo,
-    hfModelUrl: setHfModelUrl,
-    hfApiToken: setHfApiToken,
+    shopifyStoreName: setShopifyStoreName,
+    shopifyApiKey: setShopifyApiKey,
+    shopifyApiPassword: setShopifyApiPassword,
   };
 
   useEffect(() => {
     if (isOpen && typeof window !== 'undefined') {
       for (const [key, setter] of Object.entries(keysToManage)) {
-        // Adjusted key construction to be more robust
         const storageKey = `LUMINOUS_${camelToSnakeCase(key)}`;
         const storedValue = window.localStorage.getItem(storageKey);
         setter(storedValue || '');
@@ -56,8 +56,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
       githubPat,
       githubUser,
       githubRepo,
-      hfModelUrl,
-      hfApiToken,
+      shopifyStoreName,
+      shopifyApiKey,
+      shopifyApiPassword,
     };
     onSave(keysToSave);
   };
@@ -96,6 +97,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
           <InputField label="Redis REST Token" value={redisToken} onChange={(e) => setRedisToken(e.target.value)} placeholder="Your Upstash token" type="password" />
 
           <hr className="border-slate-700 my-4" />
+          <h3 className="text-md font-semibold text-purple-300">E-Commerce (Shopify)</h3>
+          <InputField label="Shopify Store Name" value={shopifyStoreName} onChange={(e) => setShopifyStoreName(e.target.value)} placeholder="e.g., your-store from your-store.myshopify.com" />
+          <InputField label="Shopify Admin API Key" value={shopifyApiKey} onChange={(e) => setShopifyApiKey(e.target.value)} placeholder="Your Shopify Admin API Key" type="password" />
+          <InputField label="Shopify Admin API Password / Access Token" value={shopifyApiPassword} onChange={(e) => setShopifyApiPassword(e.target.value)} placeholder="Your Shopify app password or access token" type="password" />
+          
+          <hr className="border-slate-700 my-4" />
           <h3 className="text-md font-semibold text-purple-300">Web Search (SerpApi)</h3>
           <InputField label="SerpApi API Key" value={serpApiKey} onChange={(e) => setSerpApiKey(e.target.value)} placeholder="Your SerpApi key" type="password" />
 
@@ -105,12 +112,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSave }
           <InputField label="GitHub Repository" value={githubRepo} onChange={(e) => setGithubRepo(e.target.value)} placeholder="e.g., 'generative-ai-docs'" />
           <InputField label="GitHub Personal Access Token" value={githubPat} onChange={(e) => setGithubPat(e.target.value)} placeholder="A classic PAT with 'repo' scope" type="password" />
           
-          <hr className="border-slate-700 my-4" />
-          <h3 className="text-md font-semibold text-purple-300">Custom Model (Hugging Face)</h3>
-          <p className="text-xs text-slate-400 mb-2">Optional. If configured, this will be used instead of the Gemini API.</p>
-          <InputField label="Model Inference Endpoint URL" value={hfModelUrl} onChange={(e) => setHfModelUrl(e.target.value)} placeholder="e.g., https://api-inference.huggingface.co/models/..." />
-          <InputField label="Hugging Face API Token" value={hfApiToken} onChange={(e) => setHfApiToken(e.target.value)} placeholder="Your Hugging Face read token" type="password" />
-
           <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 text-xs rounded-md p-3 mt-2">
             <p><span className="font-bold">Security Warning:</span> Storing API keys in the browser is convenient but not recommended for production environments. Keys are stored in your browser's local storage. Ensure you are in a secure environment.</p>
           </div>

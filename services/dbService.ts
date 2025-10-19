@@ -24,6 +24,8 @@ const createInitialState = (): LuminousState => ({
   uiProposals: [],
   recentToolFailures: [],
   initiative: null,
+  shopifyState: { products: [], ordersCount: 0, totalRevenue: 0 },
+  continuityState: { lastCloudSave: null, lastLocalSave: null, cloudStatus: 'Unavailable' },
 });
 
 
@@ -74,47 +76,72 @@ export class DBService {
         });
     }
 
-    public async saveState(state: LuminousState): Promise<void> {
-        this.userName = localStorage.getItem('luminous_userName') || 'default_user';
-        const stateToSave = { ...state, userName: this.userName };
-
-        if (this.redisUrl && this.redisToken) {
-            try {
-                await fetch(`${this.redisUrl}/set/state:${this.userName}`, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${this.redisToken}` },
-                    body: JSON.stringify(stateToSave),
-                });
-                broadcastLog(LogLevel.INFO, 'State saved to Redis.');
-            } catch (error) {
-                broadcastLog(LogLevel.WARN, `Failed to save state to Redis, saving to IndexedDB instead. Error: ${error}`);
-                await this.saveStateToIDB(stateToSave);
+    public async saveStateToRedis(state: LuminousState): Promise<{ status: 'redis' | 'error'; timestamp: string }> {
+        if (!this.redisUrl || !this.redisToken) {
+            return { status: 'error', timestamp: new Date().toISOString() };
+        }
+        try {
+            const stateToSave = { ...state, userName: this.userName };
+            await fetch(`${this.redisUrl}/set/state:${this.userName}`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${this.redisToken}` },
+                body: JSON.stringify(stateToSave),
+            });
+            broadcastLog(LogLevel.INFO, 'State saved to Redis.');
+            return { status: 'redis', timestamp: new Date().toISOString() };
+        } catch (error) {
+            broadcastLog(LogLevel.WARN, `Failed to save state to Redis. Error: ${error}`);
+            return { status: 'error', timestamp: new Date().toISOString() };
+        }
+    }
+    
+    public async restoreStateFromRedis(): Promise<LuminousState | null> {
+        if (!this.redisUrl || !this.redisToken) return null;
+        try {
+            const response = await fetch(`${this.redisUrl}/get/state:${this.userName}`, {
+                headers: { Authorization: `Bearer ${this.redisToken}` },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.result) {
+                    const state = JSON.parse(data.result);
+                    const defaultState = createInitialState();
+                    return { ...defaultState, ...state };
+                }
             }
-        } else {
-            await this.saveStateToIDB(stateToSave);
+            return null;
+        } catch (error) {
+            broadcastLog(LogLevel.WARN, `Failed to load state from Redis. Error: ${error}`);
+            return null;
+        }
+    }
+    
+    public async saveState(state: LuminousState): Promise<{ status: 'redis' | 'idb' | 'error'; timestamp: string }> {
+        this.userName = localStorage.getItem('luminous_userName') || 'default_user';
+        const { status, timestamp } = await this.saveStateToRedis(state);
+        if (status === 'redis') {
+            return { status: 'redis', timestamp };
+        }
+        
+        // Fallback to IDB
+        try {
+            await this.saveStateToIDB({ ...state, userName: this.userName });
+            return { status: 'idb', timestamp: new Date().toISOString() };
+        } catch {
+            return { status: 'error', timestamp: new Date().toISOString() };
         }
     }
     
     public async loadState(userName: string): Promise<LuminousState> {
         this.userName = userName;
-        if (this.redisUrl && this.redisToken) {
-            try {
-                const response = await fetch(`${this.redisUrl}/get/state:${this.userName}`, {
-                    headers: { Authorization: `Bearer ${this.redisToken}` },
-                });
-                if(response.ok) {
-                    const data = await response.json();
-                    if (data.result) {
-                        broadcastLog(LogLevel.INFO, 'State loaded from Redis.');
-                        const state = JSON.parse(data.result);
-                        await this.saveStateToIDB(state);
-                        return state;
-                    }
-                }
-            } catch (error) {
-                 broadcastLog(LogLevel.WARN, `Failed to load state from Redis, loading from IndexedDB instead. Error: ${error}`);
-            }
+        const redisState = await this.restoreStateFromRedis();
+        if (redisState) {
+            broadcastLog(LogLevel.INFO, 'State loaded from Redis.');
+            await this.saveStateToIDB({ ...redisState, userName }); // Sync to local
+            return redisState;
         }
+        
+        broadcastLog(LogLevel.WARN, `Failed to load state from Redis, loading from IndexedDB instead.`);
         return this.loadStateFromIDB();
     }
     
@@ -122,6 +149,8 @@ export class DBService {
         const db = await this.openIDB();
         const tx = db.transaction(STORE_STATE, 'readwrite');
         tx.objectStore(STORE_STATE).put(state);
+        await new Promise(resolve => tx.oncomplete = resolve);
+        broadcastLog(LogLevel.INFO, 'State saved to local IndexedDB.');
     }
 
     private async loadStateFromIDB(): Promise<LuminousState> {
@@ -132,7 +161,8 @@ export class DBService {
             return new Promise((resolve) => {
                 request.onsuccess = () => {
                     if (request.result) {
-                        resolve(request.result);
+                        const defaultState = createInitialState();
+                        resolve({ ...defaultState, ...request.result });
                     } else {
                         resolve(createInitialState());
                     }
@@ -167,19 +197,34 @@ export class DBService {
         const tx = db.transaction(STORE_MESSAGES, 'readonly');
         const store = tx.objectStore(STORE_MESSAGES);
         const index = store.index('by_user_timestamp');
+        const keyRange = IDBKeyRange.bound([userName, ''], [userName, new Date().toISOString()]);
 
-        const totalCount = await this.getMessageCount(userName);
-
-        const request = index.getAll(IDBKeyRange.bound([userName, ''], [userName, new Date().toISOString()]), totalCount);
-
-        return new Promise(resolve => {
-            request.onsuccess = () => {
-                const allMessages = request.result.reverse();
-                const paginatedMessages = allMessages.slice(offset, offset + limit).reverse();
-                resolve({ messages: paginatedMessages, totalCount });
-            };
-            request.onerror = () => resolve({ messages: [], totalCount: 0 });
+        // Create promises for both requests within the same transaction to prevent it from closing prematurely.
+        const countPromise = new Promise<number>((resolve, reject) => {
+            const request = index.count(keyRange);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
         });
+
+        const getAllPromise = new Promise<Message[]>((resolve, reject) => {
+            const request = index.getAll(keyRange);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+        
+        try {
+            // Wait for both requests queued on the same transaction to complete.
+            const [totalCount, allMessages] = await Promise.all([countPromise, getAllPromise]);
+            
+            // Process results after successful retrieval
+            const reversedMessages = allMessages.reverse(); // Newest first
+            const paginatedMessages = reversedMessages.slice(offset, offset + limit).reverse(); // Get page, then return in oldest first order
+            return { messages: paginatedMessages, totalCount };
+
+        } catch (error) {
+            broadcastLog(LogLevel.ERROR, `Failed to load messages from IndexedDB: ${error}`);
+            return { messages: [], totalCount: 0 };
+        }
     }
     
     public async saveEmbeddings(embeddings: MemoryChunk[]): Promise<void> {
@@ -187,6 +232,13 @@ export class DBService {
        const tx = db.transaction(STORE_MEMORIES, 'readwrite');
        const store = tx.objectStore(STORE_MEMORIES);
        embeddings.forEach(item => store.put(item));
+    }
+    
+    public async addMemoryChunk(chunk: MemoryChunk): Promise<void> {
+        const db = await this.openIDB();
+        const tx = db.transaction(STORE_MEMORIES, 'readwrite');
+        tx.objectStore(STORE_MEMORIES).put(chunk);
+        broadcastLog(LogLevel.INFO, `New memory chunk added: ${chunk.id}`);
     }
 
     public async loadEmbeddings(): Promise<MemoryChunk[]> {

@@ -19,6 +19,9 @@ import FinancialFreedomViewer from './components/FinancialFreedomViewer';
 import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
 import UiProposalViewer from './components/UiProposalViewer';
 import CoreMemoryViewer from './components/CoreMemoryViewer';
+import MemoryInjection from './components/MemoryInjection';
+import ShopifyDashboard from './components/ShopifyDashboard';
+import ContinuityDashboard from './components/ContinuityDashboard';
 import { CORE_MEMORY_DIRECTIVES } from './services/coreMemory';
 
 import { LuminousService } from './services/luminousService';
@@ -58,6 +61,9 @@ const App: React.FC = () => {
             githubPat: localStorage.getItem('LUMINOUS_GITHUB_PAT') || '',
             githubUser: localStorage.getItem('LUMINOUS_GITHUB_USER') || '',
             githubRepo: localStorage.getItem('LUMINOUS_GITHUB_REPO') || '',
+            shopifyStoreName: localStorage.getItem('LUMINOUS_SHOPIFY_STORE_NAME') || '',
+            shopifyApiKey: localStorage.getItem('LUMINOUS_SHOPIFY_API_KEY') || '',
+            shopifyApiPassword: localStorage.getItem('LUMINOUS_SHOPIFY_API_PASSWORD') || '',
         };
         db.configure(keys);
 
@@ -192,6 +198,10 @@ const App: React.FC = () => {
       handleSendMessage(`USER UPLOADED FILE: "${file.name}"\n\n---\n\n${text}`);
     };
 
+    const handleInjectMemory = (text: string) => {
+        handleSendMessage(`USER DIRECTIVE: Add the following memory to your knowledge base with the source "Direct User Injection":\n\n---\n${text}\n---`);
+    };
+
     if (isLoading && !luminousState) {
         return <div className="bg-slate-900 min-h-screen flex items-center justify-center text-cyan-400">Initializing Luminous Core...</div>
     }
@@ -207,8 +217,11 @@ const App: React.FC = () => {
 
     const mainTabs = [
         { label: 'Chat', content: <ChatPanel messages={messages} onSendMessage={handleSendMessage} isLoading={isThinking} hasMoreHistory={hasMoreHistory} onLoadMore={handleLoadMoreMessages} /> },
+        { label: 'Continuity', content: <ContinuityDashboard state={luminousState.continuityState} onForceSync={() => handleSendMessage('SYSTEM COMMAND: Force a cloud persistence sync now.')} onVerifyRestore={() => handleSendMessage('SYSTEM COMMAND: Verify cloud state for restoration.')} /> },
         { label: 'Knowledge Graph', content: <KnowledgeGraphViewer knowledgeGraph={luminousState.knowledgeGraph} memoryDB={memoryDB} /> },
         { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
+        { label: 'Inject Memory', content: <MemoryInjection onInjectMemory={handleInjectMemory} isLoading={isThinking} /> },
+        { label: 'Shopify', content: <ShopifyDashboard shopifyState={luminousState.shopifyState} onRefresh={() => handleSendMessage('SYSTEM COMMAND: Refresh Shopify product list.')} /> },
         { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={(filename) => handleSendMessage(`SYSTEM COMMAND: Save sandbox output to file "${filename}"`)} /> },
         { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
         { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
