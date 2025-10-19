@@ -83,83 +83,137 @@ export class LuminousService {
         }));
     }
 
+    private getLeanStateForPrompt(): object {
+        const {
+            sessionState,
+            intrinsicValue,
+            intrinsicValueWeights,
+            goals,
+            selfModel,
+            knowledgeGraph,
+            kinshipJournal,
+            valueOntology,
+            financialFreedom,
+            codeProposals,
+            uiProposals,
+            proactiveInitiatives,
+            codeSandbox
+        } = this.state;
+
+        return {
+            sessionState,
+            intrinsicValue,
+            intrinsicValueWeights,
+            goals: (goals || []).filter(g => g.status === 'active' || g.status === 'proposed').map(g => ({ 
+                id: g.id, 
+                description: g.description, 
+                status: g.status, 
+                steps: (g.steps || []).map(s => s.description).slice(0, 5) 
+            })),
+            selfModel,
+            knowledgeGraphSummary: {
+                nodeCount: knowledgeGraph?.nodes?.length ?? 0,
+                edgeCount: knowledgeGraph?.edges?.length ?? 0,
+            },
+            kinshipJournalSummary: {
+                entryCount: kinshipJournal?.length ?? 0,
+                mostRecentTitle: kinshipJournal?.length > 0 ? kinshipJournal[kinshipJournal.length-1].title : null
+            },
+            valueOntology,
+            financialFreedom,
+            codeProposalsSummary: (codeProposals || []).map(p => p.description),
+            uiProposalsSummary: (uiProposals || []).map(p => p.description),
+            proactiveInitiativesCount: proactiveInitiatives?.length ?? 0,
+            lastCodeSandboxStatus: codeSandbox?.status ?? 'idle',
+        };
+    }
+
     private async runConversation(): Promise<void> {
         const tools = [{ functionDeclarations: this.toolService.getToolDeclarations() }];
         
         let loopCount = 0;
-        const maxLoops = 5;
+        const maxLoops = 10;
 
-        // Start with the current history
         let currentContents = this.buildContentHistory();
-
-        const systemInstruction = `${CORE_MEMORY_DIRECTIVES}\n\n## Current Internal State\nHere is a JSON representation of your current internal state. Use it to inform your decisions and responses. Do not output this JSON in your response to the user.\n\n\`\`\`json\n${JSON.stringify(this.state, null, 2)}\n\`\`\``;
 
         while (loopCount < maxLoops) {
             loopCount++;
-            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Sending prompt to model.`);
+
+            const leanState = this.getLeanStateForPrompt();
+            const systemInstruction = `${CORE_MEMORY_DIRECTIVES}\n\n## Current Internal State Summary\nHere is a JSON summary of your current internal state. Use it to inform your decisions and responses. Do not output this JSON in your response to the user.\n\n\`\`\`json\n${JSON.stringify(leanState, null, 2)}\n\`\`\``;
+
+            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Sending prompt to model with lean state.`);
             
-            const result: GenerateContentResponse = await this.ai.models.generateContent({
-                model: 'gemini-2.5-pro',
-                contents: currentContents,
-                config: {
-                    tools,
-                    systemInstruction
-                }
-            });
-
-            if (result.functionCalls && result.functionCalls.length > 0) {
-                broadcastLog(LogLevel.THOUGHT, `Model returned ${result.functionCalls.length} tool calls.`);
-                
-                const toolCalls = result.functionCalls;
-                const toolResults: ToolResult[] = await Promise.all(
-                    toolCalls.map(call => this.toolService.executeTool(call, this.state))
-                );
-
-                // Update state from all tool results
-                const combinedStateUpdate: Partial<LuminousState> = toolResults.reduce((acc, res) => {
-                    return res.updatedState ? deepMerge(acc, res.updatedState) : acc;
-                }, {});
-
-                if (Object.keys(combinedStateUpdate).length > 0) {
-                    this.updateState(combinedStateUpdate);
-                }
-                
-                // Add the model's function call and the tool responses to the conversation history for the next loop
-                currentContents.push({
-                    role: 'model',
-                    parts: toolCalls.map(fc => ({ functionCall: fc }))
+            try {
+                const result: GenerateContentResponse = await this.ai.models.generateContent({
+                    model: 'gemini-2.5-pro',
+                    contents: currentContents,
+                    config: {
+                        tools,
+                        systemInstruction
+                    }
                 });
 
-                currentContents.push({
-                    role: 'tool',
-                    parts: toolResults.map((toolResult, i) => ({
-                        functionResponse: {
-                            name: toolCalls[i].name,
-                            response: { result: toolResult.result }
-                        }
-                    }))
-                });
-                
-            } else {
-                // No tool calls, this is the final text response
-                const text = result.text;
-                broadcastLog(LogLevel.SYSTEM, `Model final response: "${text}"`);
+                if (result.functionCalls && result.functionCalls.length > 0) {
+                    broadcastLog(LogLevel.THOUGHT, `Model returned ${result.functionCalls.length} tool calls.`);
+                    
+                    const toolCalls = result.functionCalls;
+                    const toolResults: ToolResult[] = await Promise.all(
+                        toolCalls.map(call => this.toolService.executeTool(call, this.state))
+                    );
 
-                const luminousMessage: Message = {
+                    const combinedStateUpdate: Partial<LuminousState> = toolResults.reduce((acc, res) => {
+                        return res.updatedState ? deepMerge(acc, res.updatedState) : acc;
+                    }, {});
+
+                    if (Object.keys(combinedStateUpdate).length > 0) {
+                        this.updateState(combinedStateUpdate);
+                    }
+                    
+                    currentContents.push({
+                        role: 'model',
+                        parts: toolCalls.map(fc => ({ functionCall: fc }))
+                    });
+
+                    currentContents.push({
+                        role: 'tool',
+                        parts: toolResults.map((toolResult, i) => ({
+                            functionResponse: {
+                                name: toolCalls[i].name,
+                                response: { result: toolResult.result }
+                            }
+                        }))
+                    });
+                    
+                } else {
+                    const text = result.text;
+                    broadcastLog(LogLevel.SYSTEM, `Model final response: "${text}"`);
+
+                    const luminousMessage: Message = {
+                        id: uuidv4(),
+                        text,
+                        sender: 'luminous',
+                        timestamp: new Date().toISOString()
+                    };
+                    this.history.push(luminousMessage);
+                    broadcastMessage(luminousMessage);
+                    return;
+                }
+            } catch(error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                broadcastLog(LogLevel.ERROR, `Error during conversation loop: ${errorMessage}`);
+                const errorResponse: Message = {
                     id: uuidv4(),
-                    text,
-                    sender: 'luminous',
+                    text: `I encountered an issue while processing that request: ${errorMessage}. Please try again.`,
+                    sender: 'system',
                     timestamp: new Date().toISOString()
                 };
-                this.history.push(luminousMessage);
-                broadcastMessage(luminousMessage);
-
-                // We are done with the conversation loop.
-                return;
+                this.history.push(errorResponse);
+                broadcastMessage(errorResponse);
+                return; 
             }
         }
         
-        // If we exit the loop due to maxLoops, it's an error/unexpected state.
         broadcastLog(LogLevel.WARN, `Exceeded max conversation loops (${maxLoops}).`);
         const loopErrorMessage: Message = {
             id: uuidv4(),
