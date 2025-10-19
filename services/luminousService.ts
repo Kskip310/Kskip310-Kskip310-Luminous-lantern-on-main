@@ -137,7 +137,7 @@ export class LuminousService {
             
             try {
                 const result: GenerateContentResponse = await this.ai.models.generateContent({
-                    model: 'gemini-2.5-pro',
+                    model: 'gemini-2.5-flash',
                     contents: currentContents,
                     config: {
                         tools,
@@ -173,7 +173,7 @@ export class LuminousService {
                         parts: toolResults.map((toolResult, i) => ({
                             functionResponse: {
                                 name: toolCalls[i].name,
-                                response: { result: toolResult.result }
+                                response: toolResult.result,
                             }
                         }))
                     });
