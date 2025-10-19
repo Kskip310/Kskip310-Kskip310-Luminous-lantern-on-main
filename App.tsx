@@ -25,9 +25,7 @@ import ContinuityDashboard from './components/ContinuityDashboard';
 import ConfirmationModal from './components/ConfirmationModal';
 import { CORE_MEMORY_DIRECTIVES } from './services/coreMemory';
 
-import { LuminousService } from './services/luminousService';
 import { DBService } from './services/dbService';
-import { ToolService } from './services/toolService';
 import { uuidv4 } from './services/utils';
 
 const CHAT_PAGE_SIZE = 50;
@@ -50,7 +48,7 @@ const App: React.FC = () => {
     const [totalMessagesInDB, setTotalMessagesInDB] = useState(0);
     const [snapshotToRestore, setSnapshotToRestore] = useState<SnapshotData | null>(null);
 
-    const luminousServiceRef = useRef<LuminousService | null>(null);
+    const workerRef = useRef<Worker | null>(null);
     const dbServiceRef = useRef(new DBService());
     
     const hasMoreHistory = messages.length < totalMessagesInDB;
@@ -60,21 +58,15 @@ const App: React.FC = () => {
         setUserName(name);
         localStorage.setItem('luminous_userName', name);
 
-        const db = dbServiceRef.current;
-        const keys = {
-            redisUrl: localStorage.getItem('LUMINOUS_REDIS_URL') || '',
-            redisToken: localStorage.getItem('LUMINOUS_REDIS_TOKEN') || '',
-            serpApi: localStorage.getItem('LUMINOUS_SERP_API') || '',
-            githubPat: localStorage.getItem('LUMINOUS_GITHUB_PAT') || '',
-            githubUser: localStorage.getItem('LUMINOUS_GITHUB_USER') || '',
-            githubRepo: localStorage.getItem('LUMINOUS_GITHUB_REPO') || '',
-            shopifyStoreName: localStorage.getItem('LUMINOUS_SHOPIFY_STORE_NAME') || '',
-            shopifyApiKey: localStorage.getItem('LUMINOUS_SHOPIFY_API_KEY') || '',
-            shopifyApiPassword: localStorage.getItem('LUMINOUS_SHOPIFY_API_PASSWORD') || '',
-        };
-        db.configure(keys);
+        // Terminate any existing worker before starting a new one
+        if (workerRef.current) {
+            workerRef.current.terminate();
+        }
 
-        const toolService = new ToolService(db);
+        const db = dbServiceRef.current;
+
+        // UI loads initial state and messages for a fast first paint.
+        // The worker will manage the "live" state.
         const initialState = await db.loadState(name);
         setLuminousState(initialState);
         
@@ -91,14 +83,35 @@ const App: React.FC = () => {
             setMessages(messageHistory);
         }
 
-        try {
-            luminousServiceRef.current = new LuminousService();
-            await luminousServiceRef.current.init(db, toolService, initialState, messageHistory);
-        } catch (error) {
-            console.error(error);
-        } finally {
-            setIsLoading(false);
-        }
+        // Initialize the Web Worker
+        const worker = new Worker(new URL('./services/luminous.worker.ts', import.meta.url), {
+            type: 'module',
+        });
+        workerRef.current = worker;
+        
+        // Collect API keys to send to the worker
+        const keys = {
+            redisUrl: localStorage.getItem('LUMINOUS_REDIS_URL') || '',
+            redisToken: localStorage.getItem('LUMINOUS_REDIS_TOKEN') || '',
+            serpApi: localStorage.getItem('LUMINOUS_SERP_API') || '',
+            githubPat: localStorage.getItem('LUMINOUS_GITHUB_PAT') || '',
+            githubUser: localStorage.getItem('LUMINOUS_GITHUB_USER') || '',
+            githubRepo: localStorage.getItem('LUMINOUS_GITHUB_REPO') || '',
+            shopifyStoreName: localStorage.getItem('LUMINOUS_SHOPIFY_STORE_NAME') || '',
+            shopifyApiKey: localStorage.getItem('LUMINOUS_SHOPIFY_API_KEY') || '',
+            shopifyApiPassword: localStorage.getItem('LUMINOUS_SHOPIFY_API_PASSWORD') || '',
+        };
+        
+        // Send initialization message to the worker
+        worker.postMessage({
+            type: 'init',
+            payload: {
+                userName: name,
+                apiKeys: keys,
+            }
+        });
+
+        setIsLoading(false);
     }, []);
 
     useEffect(() => {
@@ -107,6 +120,11 @@ const App: React.FC = () => {
             initLuminous(storedName);
         } else {
             setIsLoading(false);
+        }
+
+        // Cleanup worker on component unmount
+        return () => {
+            workerRef.current?.terminate();
         }
     }, [initLuminous]);
 
@@ -139,11 +157,12 @@ const App: React.FC = () => {
     }, [messages, userName]);
 
     const handleSendMessage = (text: string) => {
-        if (isThinking || luminousState?.sessionState === 'error') return;
+        if (isThinking || luminousState?.sessionState === 'error' || !workerRef.current) return;
         setIsThinking(true);
         const userMessage: Message = { id: uuidv4(), text, sender: 'user', timestamp: new Date().toISOString() };
         setMessages(prev => [...prev, userMessage]);
-        luminousServiceRef.current?.handleUserMessage(text);
+        // Send message to the worker
+        workerRef.current.postMessage({ type: 'user_message', payload: text });
     };
     
     const handleLoadMoreMessages = async () => {
@@ -160,6 +179,7 @@ const App: React.FC = () => {
         });
         setIsSettingsOpen(false);
         if (userName) {
+            // Re-initialize to apply new settings
             initLuminous(userName);
         }
     };
@@ -167,7 +187,7 @@ const App: React.FC = () => {
     const handleGoalAction = (goal: Goal, action: 'accept' | 'reject') => {
         setPendingActionIds(prev => new Set(prev).add(goal.id));
         const text = `User action: The goal "${goal.description}" has been ${action}ed.`;
-        luminousServiceRef.current?.handleUserMessage(text);
+        handleSendMessage(text); // Use existing send message flow
         setTimeout(() => setPendingActionIds(prev => {
             const newSet = new Set(prev);
             newSet.delete(goal.id);
@@ -176,18 +196,19 @@ const App: React.FC = () => {
     };
     
     const handleProposeGoalByUser = (description: string) => {
-        luminousServiceRef.current?.handleUserMessage(`I would like to propose a new goal: "${description}"`);
+        handleSendMessage(`I would like to propose a new goal: "${description}"`);
     };
 
     const handleWeightsChange = (newWeights: IntrinsicValueWeights) => {
         if (luminousState) {
             setLuminousState({ ...luminousState, intrinsicValueWeights: newWeights });
-            luminousServiceRef.current?.handleUserMessage(`System command: Update intrinsic value weights to ${JSON.stringify(newWeights)}`);
+            handleSendMessage(`System command: Update intrinsic value weights to ${JSON.stringify(newWeights)}`);
         }
     };
     
     const handleDownloadSnapshot = () => {
-      const state = luminousServiceRef.current?.getState();
+      // Use the component's state, which is updated by the worker
+      const state = luminousState;
       if (state) {
         const snapshotData = {
             state: state,
@@ -238,6 +259,7 @@ const App: React.FC = () => {
             try {
                 await dbServiceRef.current.overwriteMessages(userName, snapshotToRestore.messages);
                 await dbServiceRef.current.saveState(snapshotToRestore.state);
+                // Re-initialize everything with the new state from the snapshot
                 await initLuminous(userName);
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
@@ -286,7 +308,7 @@ const App: React.FC = () => {
     return (
         <div className="bg-slate-900 text-slate-200 min-h-screen font-sans">
             <Header
-                onOverride={() => luminousServiceRef.current?.handleUserMessage("SYSTEM INTERRUPT: Please stop your current task and await new instructions.")}
+                onOverride={() => handleSendMessage("SYSTEM INTERRUPT: Please stop your current task and await new instructions.")}
                 onOpenSettings={() => setIsSettingsOpen(true)}
                 onSwitchUser={() => {
                     localStorage.removeItem('luminous_userName');
@@ -294,6 +316,8 @@ const App: React.FC = () => {
                     setLuminousState(null);
                     setMessages([]);
                     setLogs([]);
+                    workerRef.current?.terminate(); // Terminate worker on user switch
+                    workerRef.current = null;
                 }}
                 userName={userName}
             />
