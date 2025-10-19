@@ -22,6 +22,7 @@ import CoreMemoryViewer from './components/CoreMemoryViewer';
 import MemoryInjection from './components/MemoryInjection';
 import ShopifyDashboard from './components/ShopifyDashboard';
 import ContinuityDashboard from './components/ContinuityDashboard';
+import ConfirmationModal from './components/ConfirmationModal';
 import { CORE_MEMORY_DIRECTIVES } from './services/coreMemory';
 
 import { LuminousService } from './services/luminousService';
@@ -30,6 +31,11 @@ import { ToolService } from './services/toolService';
 import { uuidv4 } from './services/utils';
 
 const CHAT_PAGE_SIZE = 50;
+
+type SnapshotData = {
+    state: LuminousState;
+    messages: Message[];
+};
 
 const App: React.FC = () => {
     const [userName, setUserName] = useState<string | null>(null);
@@ -42,6 +48,7 @@ const App: React.FC = () => {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [pendingActionIds, setPendingActionIds] = useState(new Set<string>());
     const [totalMessagesInDB, setTotalMessagesInDB] = useState(0);
+    const [snapshotToRestore, setSnapshotToRestore] = useState<SnapshotData | null>(null);
 
     const luminousServiceRef = useRef<LuminousService | null>(null);
     const dbServiceRef = useRef(new DBService());
@@ -153,7 +160,6 @@ const App: React.FC = () => {
         });
         setIsSettingsOpen(false);
         if (userName) {
-            // Re-initialize to apply settings
             initLuminous(userName);
         }
     };
@@ -166,7 +172,7 @@ const App: React.FC = () => {
             const newSet = new Set(prev);
             newSet.delete(goal.id);
             return newSet;
-        }), 5000); // Increased timeout
+        }), 5000);
     };
     
     const handleProposeGoalByUser = (description: string) => {
@@ -183,19 +189,65 @@ const App: React.FC = () => {
     const handleDownloadSnapshot = () => {
       const state = luminousServiceRef.current?.getState();
       if (state) {
-        const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+        const snapshotData = {
+            state: state,
+            messages: messages,
+        };
+        const blob = new Blob([JSON.stringify(snapshotData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `luminous-snapshot-${new Date().toISOString()}.json`;
+        a.download = `luminous-snapshot-${new Date().toISOString().replace(/:/g, '-')}.json`;
         a.click();
         URL.revokeObjectURL(url);
       }
     };
     
     const handleFileUpload = async (file: File) => {
-      const text = await file.text();
-      handleSendMessage(`USER UPLOADED FILE: "${file.name}"\n\n---\n\n${text}`);
+      if (file.name.startsWith('luminous-snapshot-') && file.name.endsWith('.json')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const text = event.target?.result as string;
+            const snapshotData = JSON.parse(text);
+            if (snapshotData && snapshotData.state && Array.isArray(snapshotData.messages) && snapshotData.state.selfModel) {
+              setSnapshotToRestore(snapshotData);
+            } else {
+              handleSendMessage(`USER DIRECTIVE: The file "${file.name}" looks like a snapshot, but it seems to be malformed. I will process it as a regular text file.\n\n---\n\n${text}`);
+            }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            handleSendMessage(`USER DIRECTIVE: I tried to read "${file.name}" as a snapshot, but failed to parse it. Please ensure it's a valid JSON file. Error: ${errorMessage}`);
+          }
+        };
+        reader.onerror = () => {
+             handleSendMessage(`USER DIRECTIVE: I failed to read the file "${file.name}".`);
+        };
+        reader.readAsText(file);
+      } else {
+        const text = await file.text();
+        handleSendMessage(`USER UPLOADED FILE: "${file.name}"\n\n---\n\n${text}`);
+      }
+    };
+
+    const handleConfirmRestore = async () => {
+        if (snapshotToRestore && userName) {
+            setIsLoading(true);
+            setSnapshotToRestore(null);
+
+            try {
+                await dbServiceRef.current.overwriteMessages(userName, snapshotToRestore.messages);
+                await dbServiceRef.current.saveState(snapshotToRestore.state);
+                await initLuminous(userName);
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error("Failed to restore snapshot:", error);
+                const systemMessage: Message = { id: uuidv4(), text: `Failed to restore system state from snapshot. Error: ${errorMessage}`, sender: 'system', timestamp: new Date().toISOString() };
+                setMessages(prev => [...(messages || []), systemMessage]);
+            } finally {
+                setIsLoading(false);
+            }
+        }
     };
 
     const handleInjectMemory = (text: string) => {
@@ -213,7 +265,6 @@ const App: React.FC = () => {
     if (!luminousState) {
        return <div className="bg-slate-900 min-h-screen flex items-center justify-center text-red-400">Critical Error: Failed to load Luminous state. Check console and database connection.</div>
     }
-
 
     const mainTabs = [
         { label: 'Chat', content: <ChatPanel messages={messages} onSendMessage={handleSendMessage} isLoading={isThinking} hasMoreHistory={hasMoreHistory} onLoadMore={handleLoadMoreMessages} /> },
@@ -266,6 +317,15 @@ const App: React.FC = () => {
                 </aside>
             </main>
             <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onSave={handleSaveSettings} />
+            <ConfirmationModal
+                isOpen={!!snapshotToRestore}
+                onClose={() => setSnapshotToRestore(null)}
+                onConfirm={handleConfirmRestore}
+                title="Restore from Snapshot?"
+            >
+                <p>You are about to restore Luminous from a snapshot. This action will completely overwrite the current state and conversation history.</p>
+                <p className="mt-2 font-bold text-amber-300">This action cannot be undone. Are you sure you want to proceed?</p>
+            </ConfirmationModal>
         </div>
     );
 };

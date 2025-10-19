@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect } from 'react';
 import type { LogEntry } from '../types';
 import { LogLevel } from '../types';
@@ -54,8 +55,9 @@ const LogViewer: React.FC<LogViewerProps> = ({ logs, onFileUpload, onDownloadSna
           <button
             onClick={handleUploadClick}
             className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-1 rounded-md hover:bg-cyan-500/40 transition-colors"
+            title="Upload a file for processing or a snapshot (.json) to restore state"
           >
-            Upload Memory
+            Upload File
           </button>
           <button
             onClick={onDownloadSnapshot}

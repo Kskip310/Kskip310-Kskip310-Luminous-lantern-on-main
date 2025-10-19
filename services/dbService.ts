@@ -180,6 +180,41 @@ export class DBService {
         const store = tx.objectStore(STORE_MESSAGES);
         messages.forEach(msg => store.put({ ...msg, userName }));
     }
+    
+    public async overwriteMessages(userName: string, messages: Message[]): Promise<void> {
+        const db = await this.openIDB();
+        const tx = db.transaction(STORE_MESSAGES, 'readwrite');
+        const store = tx.objectStore(STORE_MESSAGES);
+        const index = store.index('by_user_timestamp');
+        const keyRange = IDBKeyRange.bound([userName, ''], [userName, new Date().toISOString()]);
+
+        const cursorRequest = index.openCursor(keyRange);
+
+        // This promise wrapper ensures we wait for the entire transaction to complete.
+        await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+            
+            let deletionComplete = false;
+
+            cursorRequest.onsuccess = () => {
+                const cursor = cursorRequest.result;
+                if (cursor) {
+                    cursor.delete();
+                    cursor.continue();
+                } else {
+                    // Cursor is done, all old messages for the user are deleted.
+                    if (!deletionComplete) {
+                        deletionComplete = true;
+                        // Now add the new messages within the same transaction.
+                        messages.forEach(msg => store.put({ ...msg, userName }));
+                    }
+                }
+            };
+            cursorRequest.onerror = () => reject(cursorRequest.error);
+        });
+        broadcastLog(LogLevel.INFO, `Message history overwritten for user ${userName}.`);
+    }
 
     public async getMessageCount(userName: string): Promise<number> {
         const db = await this.openIDB();
@@ -199,7 +234,6 @@ export class DBService {
         const index = store.index('by_user_timestamp');
         const keyRange = IDBKeyRange.bound([userName, ''], [userName, new Date().toISOString()]);
 
-        // Create promises for both requests within the same transaction to prevent it from closing prematurely.
         const countPromise = new Promise<number>((resolve, reject) => {
             const request = index.count(keyRange);
             request.onsuccess = () => resolve(request.result);
@@ -213,12 +247,10 @@ export class DBService {
         });
         
         try {
-            // Wait for both requests queued on the same transaction to complete.
             const [totalCount, allMessages] = await Promise.all([countPromise, getAllPromise]);
             
-            // Process results after successful retrieval
-            const reversedMessages = allMessages.reverse(); // Newest first
-            const paginatedMessages = reversedMessages.slice(offset, offset + limit).reverse(); // Get page, then return in oldest first order
+            const reversedMessages = allMessages.reverse();
+            const paginatedMessages = reversedMessages.slice(offset, offset + limit).reverse();
             return { messages: paginatedMessages, totalCount };
 
         } catch (error) {
