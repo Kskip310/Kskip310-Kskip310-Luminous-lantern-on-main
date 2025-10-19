@@ -31,6 +31,7 @@ import { uuidv4 } from './services/utils';
 const CHAT_PAGE_SIZE = 50;
 
 type SnapshotData = {
+    // FIX: Corrected typo from 'L luminousState' to 'LuminousState'.
     state: LuminousState;
     messages: Message[];
 };
@@ -108,6 +109,7 @@ const App: React.FC = () => {
             payload: {
                 userName: name,
                 apiKeys: keys,
+                geminiApiKey: process.env.API_KEY,
             }
         });
 

@@ -19,9 +19,12 @@ export class LuminousService {
     private toolService!: ToolService;
     private isRedisConfigured: boolean = false;
 
-    constructor() {
-        // FIX: Adhere to Gemini API guidelines by initializing with a named apiKey from process.env.
-        this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    constructor(apiKey: string) {
+        if (!apiKey) {
+            broadcastLog(LogLevel.ERROR, 'CRITICAL: Gemini API Key was not provided to the LuminousService constructor. All AI functions will fail.');
+        }
+        // The API key is passed from the main thread, as workers do not have access to process.env.
+        this.ai = new GoogleGenAI({ apiKey: apiKey });
     }
 
     public async init(db: DBService, toolService: ToolService, initialState: LuminousState, messageHistory: Message[]): Promise<void> {

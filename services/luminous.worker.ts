@@ -28,7 +28,7 @@ self.onmessage = async (event: MessageEvent) => {
     try {
         if (type === 'init') {
             broadcastLog(LogLevel.SYSTEM, 'Luminous worker received init signal.');
-            const { userName, apiKeys } = payload;
+            const { userName, apiKeys, geminiApiKey } = payload;
             
             // Set the username in the worker's faked localStorage for dbService
             localStorage.setItem('luminous_userName', userName);
@@ -40,7 +40,7 @@ self.onmessage = async (event: MessageEvent) => {
             const initialState = await db.loadState(userName);
             const { messages: messageHistory } = await db.loadMessages(userName, MAX_HISTORY_FOR_WORKER_CONTEXT);
 
-            luminousService = new LuminousService();
+            luminousService = new LuminousService(geminiApiKey);
             await luminousService.init(db, toolService, initialState, messageHistory);
             broadcastLog(LogLevel.SYSTEM, 'Luminous worker initialized successfully.');
 
