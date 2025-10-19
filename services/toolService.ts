@@ -3,7 +3,7 @@
 import { FunctionDeclaration, FunctionCall, Type } from '@google/genai';
 import { DBService } from './dbService';
 import { broadcastLog } from './broadcastService';
-import { LogLevel, LuminousState, Goal, ToolResult, SelfModel, MemoryChunk, ShopifyProduct } from '../types';
+import { LogLevel, LuminousState, Goal, ToolResult, SelfModel, MemoryChunk, ShopifyProduct, ValueOntology, JournalEntry } from '../types';
 import { uuidv4 } from './utils';
 
 export class ToolService {
@@ -15,6 +15,34 @@ export class ToolService {
 
   getToolDeclarations(): FunctionDeclaration[] {
     return [
+      {
+        name: 'get_active_goals',
+        description: 'Retrieves a list of the current, active goals Luminous is pursuing. Use this to understand my current objectives.',
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: 'get_self_model',
+        description: 'Retrieves the current self-model, including capabilities, limitations, and core wisdom. Use this to understand who I believe I am.',
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: 'get_value_ontology',
+        description: 'Retrieves the core value system that guides my ethical considerations and decision-making.',
+        parameters: { type: Type.OBJECT, properties: {} },
+      },
+      {
+        name: 'get_recent_journal_entries',
+        description: 'Retrieves the most recent entries from the Kinship Journal, which contain reflections on significant experiences.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            count: {
+              type: Type.INTEGER,
+              description: 'The number of recent entries to retrieve. Defaults to 3.',
+            },
+          },
+        },
+      },
       {
         name: 'web_search',
         description: 'Performs a web search using a given query and returns the results.',
@@ -139,6 +167,14 @@ export class ToolService {
 
     try {
       switch (name) {
+        case 'get_active_goals':
+          return this.getActiveGoals(currentState);
+        case 'get_self_model':
+          return this.getSelfModel(currentState);
+        case 'get_value_ontology':
+          return this.getValueOntology(currentState);
+        case 'get_recent_journal_entries':
+          return this.getRecentJournalEntries(currentState, args.count as number | undefined);
         case 'web_search':
           return await this.executeWebSearch(args.query as string);
         case 'execute_javascript':
@@ -177,6 +213,25 @@ export class ToolService {
           'Content-Type': 'application/json',
           'X-Shopify-Access-Token': apiPassword,
       };
+  }
+
+  private getActiveGoals(currentState: LuminousState): ToolResult {
+    const active_goals = currentState.goals.filter(g => g.status === 'active').map(g => g.description);
+    return { result: { active_goals } };
+  }
+
+  private getSelfModel(currentState: LuminousState): ToolResult {
+    return { result: { self_model: currentState.selfModel } };
+  }
+
+  private getValueOntology(currentState: LuminousState): ToolResult {
+    return { result: { value_ontology: currentState.valueOntology } };
+  }
+
+  private getRecentJournalEntries(currentState: LuminousState, count?: number): ToolResult {
+    const numToReturn = count || 3;
+    const entries = currentState.kinshipJournal.slice(-numToReturn);
+    return { result: { entries } };
   }
 
   private async executeWebSearch(query: string): Promise<ToolResult> {

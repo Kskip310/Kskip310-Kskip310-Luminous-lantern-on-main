@@ -10,7 +10,7 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ onOverride, onOpenSettings, onSwitchUser, userName }) => {
   return (
-    <header className="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-700 flex items-center justify-between shadow-lg sticky top-0 z-10">
+    <header className="p-4 bg-slate-900/60 backdrop-blur-lg border-b border-slate-700/50 flex items-center justify-between shadow-lg sticky top-0 z-10">
       <div className="flex items-center">
         <div className="w-3 h-3 bg-cyan-400 rounded-full mr-3 animate-pulse"></div>
         <h1 className="text-xl font-bold text-slate-100 tracking-wider">Luminous Synergy Skipper</h1>

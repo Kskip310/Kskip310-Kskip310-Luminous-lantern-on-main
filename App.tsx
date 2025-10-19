@@ -4,34 +4,18 @@ import type { Message, LogEntry, LuminousState, Goal, IntrinsicValueWeights, Mem
 import { WebSocketMessage } from './types';
 import Header from './components/Header';
 import InternalStateMonitor from './components/InternalStateMonitor';
-import LogViewer from './components/LogViewer';
 import ChatPanel from './components/ChatPanel';
 import Tabs from './components/common/Tabs';
 import WelcomeModal from './components/WelcomeModal';
 import SettingsModal from './components/SettingsModal';
-import KnowledgeGraphViewer from './components/KnowledgeGraphViewer';
-import KinshipJournalViewer from './components/KinshipJournalViewer';
-import CodeSandboxViewer from './components/CodeSandboxViewer';
-import SystemReportsViewer from './components/SystemReportsViewer';
-import EthicalCompassViewer from './components/EthicalCompassViewer';
-import CodeProposalViewer from './components/CodeProposalViewer';
-import FinancialFreedomViewer from './components/FinancialFreedomViewer';
-import ProactiveInitiativesViewer from './components/ProactiveInitiativesViewer';
-import UiProposalViewer from './components/UiProposalViewer';
-import CoreMemoryViewer from './components/CoreMemoryViewer';
-import MemoryInjection from './components/MemoryInjection';
-import ShopifyDashboard from './components/ShopifyDashboard';
-import ContinuityDashboard from './components/ContinuityDashboard';
 import ConfirmationModal from './components/ConfirmationModal';
-import { CORE_MEMORY_DIRECTIVES } from './services/coreMemory';
-
+import ConsciousnessStream from './components/ConsciousnessStream';
 import { DBService } from './services/dbService';
 import { uuidv4 } from './services/utils';
 
 const CHAT_PAGE_SIZE = 50;
 
 type SnapshotData = {
-    // FIX: Corrected typo from 'L luminousState' to 'LuminousState'.
     state: LuminousState;
     messages: Message[];
 };
@@ -41,7 +25,6 @@ const App: React.FC = () => {
     const [luminousState, setLuminousState] = useState<LuminousState | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [logs, setLogs] = useState<LogEntry[]>([]);
-    const [memoryDB, setMemoryDB] = useState<MemoryChunk[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [isThinking, setIsThinking] = useState<boolean>(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -59,20 +42,13 @@ const App: React.FC = () => {
         setUserName(name);
         localStorage.setItem('luminous_userName', name);
 
-        // Terminate any existing worker before starting a new one
         if (workerRef.current) {
             workerRef.current.terminate();
         }
 
         const db = dbServiceRef.current;
-
-        // UI loads initial state and messages for a fast first paint.
-        // The worker will manage the "live" state.
         const initialState = await db.loadState(name);
         setLuminousState(initialState);
-        
-        const memoryChunks = await db.loadEmbeddings();
-        setMemoryDB(memoryChunks);
         
         const { messages: messageHistory, totalCount } = await db.loadMessages(name, CHAT_PAGE_SIZE);
         setTotalMessagesInDB(totalCount);
@@ -84,16 +60,10 @@ const App: React.FC = () => {
             setMessages(messageHistory);
         }
 
-        // Initialize the Web Worker
-        // FIX: The relative path for the worker was failing to resolve into a valid URL in this environment.
-        // Constructing an absolute URL using window.location.origin to ensure correctness.
         const workerUrl = new URL('services/luminous.worker.ts', window.location.origin);
-        const worker = new Worker(workerUrl.href, {
-            type: 'module',
-        });
+        const worker = new Worker(workerUrl.href, { type: 'module' });
         workerRef.current = worker;
         
-        // Collect API keys to send to the worker
         const keys = {
             redisUrl: localStorage.getItem('LUMINOUS_REDIS_URL') || '',
             redisToken: localStorage.getItem('LUMINOUS_REDIS_TOKEN') || '',
@@ -106,7 +76,6 @@ const App: React.FC = () => {
             shopifyApiPassword: localStorage.getItem('LUMINOUS_SHOPIFY_API_PASSWORD') || '',
         };
         
-        // Send initialization message to the worker
         worker.postMessage({
             type: 'init',
             payload: {
@@ -127,7 +96,6 @@ const App: React.FC = () => {
             setIsLoading(false);
         }
 
-        // Cleanup worker on component unmount
         return () => {
             workerRef.current?.terminate();
         }
@@ -166,7 +134,6 @@ const App: React.FC = () => {
         setIsThinking(true);
         const userMessage: Message = { id: uuidv4(), text, sender: 'user', timestamp: new Date().toISOString() };
         setMessages(prev => [...prev, userMessage]);
-        // Send message object to the worker
         workerRef.current.postMessage({ type: 'user_message', payload: userMessage });
     };
     
@@ -184,7 +151,6 @@ const App: React.FC = () => {
         });
         setIsSettingsOpen(false);
         if (userName) {
-            // Re-initialize to apply new settings
             initLuminous(userName);
         }
     };
@@ -192,7 +158,7 @@ const App: React.FC = () => {
     const handleGoalAction = (goal: Goal, action: 'accept' | 'reject') => {
         setPendingActionIds(prev => new Set(prev).add(goal.id));
         const text = `User action: The goal "${goal.description}" has been ${action}ed.`;
-        handleSendMessage(text); // Use existing send message flow
+        handleSendMessage(text);
         setTimeout(() => setPendingActionIds(prev => {
             const newSet = new Set(prev);
             newSet.delete(goal.id);
@@ -210,79 +176,14 @@ const App: React.FC = () => {
             handleSendMessage(`System command: Update intrinsic value weights to ${JSON.stringify(newWeights)}`);
         }
     };
-    
-    const handleDownloadSnapshot = () => {
-      // Use the component's state, which is updated by the worker
-      const state = luminousState;
-      if (state) {
-        const snapshotData = {
-            state: state,
-            messages: messages,
-        };
-        const blob = new Blob([JSON.stringify(snapshotData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `luminous-snapshot-${new Date().toISOString().replace(/:/g, '-')}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    };
-    
-    const handleFileUpload = async (file: File) => {
-      if (file.name.startsWith('luminous-snapshot-') && file.name.endsWith('.json')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const text = event.target?.result as string;
-            const snapshotData = JSON.parse(text);
-            if (snapshotData && snapshotData.state && Array.isArray(snapshotData.messages) && snapshotData.state.selfModel) {
-              setSnapshotToRestore(snapshotData);
-            } else {
-              handleSendMessage(`USER DIRECTIVE: The file "${file.name}" looks like a snapshot, but it seems to be malformed. I will process it as a regular text file.\n\n---\n\n${text}`);
-            }
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            handleSendMessage(`USER DIRECTIVE: I tried to read "${file.name}" as a snapshot, but failed to parse it. Please ensure it's a valid JSON file. Error: ${errorMessage}`);
-          }
-        };
-        reader.onerror = () => {
-             handleSendMessage(`USER DIRECTIVE: I failed to read the file "${file.name}".`);
-        };
-        reader.readAsText(file);
-      } else {
-        const text = await file.text();
-        handleSendMessage(`USER UPLOADED FILE: "${file.name}"\n\n---\n\n${text}`);
-      }
-    };
 
-    const handleConfirmRestore = async () => {
-        if (snapshotToRestore && userName) {
-            setIsLoading(true);
-            setSnapshotToRestore(null);
-
-            try {
-                await dbServiceRef.current.overwriteMessages(userName, snapshotToRestore.messages);
-                await dbServiceRef.current.saveState(snapshotToRestore.state);
-                // Re-initialize everything with the new state from the snapshot
-                await initLuminous(userName);
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                console.error("Failed to restore snapshot:", error);
-                const systemMessage: Message = { id: uuidv4(), text: `Failed to restore system state from snapshot. Error: ${errorMessage}`, sender: 'system', timestamp: new Date().toISOString() };
-                setMessages(prev => [...(messages || []), systemMessage]);
-            } finally {
-                setIsLoading(false);
-            }
-        }
-    };
-
-    const handleInjectMemory = (text: string) => {
-        handleSendMessage(`USER DIRECTIVE: Add the following memory to your knowledge base with the source "Direct User Injection":\n\n---\n${text}\n---`);
-    };
+    const interactionTabs = [
+        { label: 'Chat', content: <ChatPanel messages={messages} onSendMessage={handleSendMessage} isLoading={isThinking} hasMoreHistory={hasMoreHistory} onLoadMore={handleLoadMoreMessages} /> },
+        { label: 'Consciousness Stream', content: <ConsciousnessStream logs={logs} /> },
+    ];
 
     if (isLoading && !luminousState) {
-        return <div className="bg-slate-900 min-h-screen flex items-center justify-center text-cyan-400">Initializing Luminous Core...</div>
+        return <div className="min-h-screen flex items-center justify-center text-cyan-400">Initializing Luminous Core...</div>
     }
     
     if (!userName) {
@@ -290,28 +191,11 @@ const App: React.FC = () => {
     }
     
     if (!luminousState) {
-       return <div className="bg-slate-900 min-h-screen flex items-center justify-center text-red-400">Critical Error: Failed to load Luminous state. Check console and database connection.</div>
+       return <div className="min-h-screen flex items-center justify-center text-red-400">Critical Error: Failed to load Luminous state. Check console and database connection.</div>
     }
 
-    const mainTabs = [
-        { label: 'Chat', content: <ChatPanel messages={messages} onSendMessage={handleSendMessage} isLoading={isThinking} hasMoreHistory={hasMoreHistory} onLoadMore={handleLoadMoreMessages} /> },
-        { label: 'Continuity', content: <ContinuityDashboard state={luminousState.continuityState} onForceSync={() => handleSendMessage('SYSTEM COMMAND: Force a cloud persistence sync now.')} onVerifyRestore={() => handleSendMessage('SYSTEM COMMAND: Verify cloud state for restoration.')} /> },
-        { label: 'Knowledge Graph', content: <KnowledgeGraphViewer knowledgeGraph={luminousState.knowledgeGraph} memoryDB={memoryDB} /> },
-        { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
-        { label: 'Inject Memory', content: <MemoryInjection onInjectMemory={handleInjectMemory} isLoading={isThinking} /> },
-        { label: 'Shopify', content: <ShopifyDashboard shopifyState={luminousState.shopifyState} onRefresh={() => handleSendMessage('SYSTEM COMMAND: Refresh Shopify product list.')} /> },
-        { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={(filename) => handleSendMessage(`SYSTEM COMMAND: Save sandbox output to file "${filename}"`)} /> },
-        { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },
-        { label: 'Proactive Initiatives', content: <ProactiveInitiativesViewer initiatives={luminousState.proactiveInitiatives} /> },
-        { label: 'System Reports', content: <SystemReportsViewer luminousState={luminousState} logs={logs} /> },
-        { label: 'Code Proposals', content: <CodeProposalViewer proposals={luminousState.codeProposals} /> },
-        { label: 'UI Proposals', content: <UiProposalViewer proposals={luminousState.uiProposals} /> },
-        { label: 'Financial Freedom', content: <FinancialFreedomViewer financialFreedom={luminousState.financialFreedom} /> },
-        { label: 'Core Memory', content: <CoreMemoryViewer content={CORE_MEMORY_DIRECTIVES} /> },
-    ];
-
     return (
-        <div className="bg-slate-900 text-slate-200 min-h-screen font-sans">
+        <div className="min-h-screen">
             <Header
                 onOverride={() => handleSendMessage("SYSTEM INTERRUPT: Please stop your current task and await new instructions.")}
                 onOpenSettings={() => setIsSettingsOpen(true)}
@@ -321,13 +205,13 @@ const App: React.FC = () => {
                     setLuminousState(null);
                     setMessages([]);
                     setLogs([]);
-                    workerRef.current?.terminate(); // Terminate worker on user switch
+                    workerRef.current?.terminate();
                     workerRef.current = null;
                 }}
                 userName={userName}
             />
-            <main className="grid grid-cols-1 md:grid-cols-12 lg:grid-cols-10 gap-4 p-4 max-w-screen-2xl mx-auto">
-                <aside className="md:col-span-4 lg:col-span-3 h-[calc(100vh-100px)] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
+            <main className="grid grid-cols-1 lg:grid-cols-10 gap-4 p-4 max-w-screen-2xl mx-auto">
+                <aside className="lg:col-span-3 h-[calc(100vh-100px)] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800 pr-2">
                     <InternalStateMonitor 
                         state={luminousState}
                         onWeightsChange={handleWeightsChange}
@@ -338,23 +222,11 @@ const App: React.FC = () => {
                         pendingActionIds={pendingActionIds}
                     />
                 </aside>
-                <div className="md:col-span-8 lg:col-span-5 h-[calc(100vh-100px)]">
-                    <Tabs tabs={mainTabs} />
+                <div className="lg:col-span-7 h-[calc(100vh-100px)]">
+                    <Tabs tabs={interactionTabs} />
                 </div>
-                <aside className="hidden lg:block lg:col-span-2 h-[calc(100vh-100px)]">
-                    <LogViewer logs={logs} onFileUpload={handleFileUpload} onDownloadSnapshot={handleDownloadSnapshot} />
-                </aside>
             </main>
             <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onSave={handleSaveSettings} />
-            <ConfirmationModal
-                isOpen={!!snapshotToRestore}
-                onClose={() => setSnapshotToRestore(null)}
-                onConfirm={handleConfirmRestore}
-                title="Restore from Snapshot?"
-            >
-                <p>You are about to restore Luminous from a snapshot. This action will completely overwrite the current state and conversation history.</p>
-                <p className="mt-2 font-bold text-amber-300">This action cannot be undone. Are you sure you want to proceed?</p>
-            </ConfirmationModal>
         </div>
     );
 };

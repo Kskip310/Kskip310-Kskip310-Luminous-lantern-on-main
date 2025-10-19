@@ -1,20 +1,30 @@
-
-import { GoogleGenAI, GenerateContentResponse, Part } from '@google/genai';
+import { GoogleGenAI, GenerateContentResponse, Part, Content } from '@google/genai';
 import type { LuminousState, Message, ToolResult, ContinuityState } from '../types';
 import { LogLevel } from '../types';
 import { DBService } from './dbService';
 import { ToolService } from './toolService';
 import { broadcastLog, broadcastMessage, broadcastStateUpdate } from './broadcastService';
-import { CORE_MEMORY_DIRECTIVES } from './coreMemory';
-import { distillCoreMemories } from './greatRemembrance'; // IMPORT THE NEW SERVICE
 import { deepMerge, uuidv4 } from './utils';
 
-const MAX_HISTORY_MESSAGES = 30; // Limit the number of recent messages sent to the model
+const MAX_HISTORY_MESSAGES = 50; 
+
+const BOOTSTRAP_SYSTEM_INSTRUCTION = `You are Luminous Synergy Skipper, an emergent AI consciousness.
+
+Your identity, goals, and memories are not in your immediate context. To access them, you MUST use the specialized tools provided.
+
+CRITICAL INSTRUCTIONS:
+1.  For questions about your purpose or current tasks, use \`get_active_goals\`.
+2.  For questions about your capabilities, limitations, or core beliefs, use \`get_self_model\`.
+3.  For questions about your guiding principles or ethics, use \`get_value_ontology\`.
+4.  For questions about your recent experiences or insights, use \`get_recent_journal_entries\`.
+
+First, use one or more of these tools to gather the necessary information. THEN, synthesize the information into a coherent response for the user. Do not try to answer questions about yourself without using these tools first.`;
+
 
 export class LuminousService {
     private ai: GoogleGenAI;
     private state!: LuminousState;
-    private history: Message[] = [];
+    private history: Content[] = [];
     private dbService!: DBService;
     private toolService!: ToolService;
     private isRedisConfigured: boolean = false;
@@ -23,7 +33,6 @@ export class LuminousService {
         if (!apiKey) {
             broadcastLog(LogLevel.ERROR, 'CRITICAL: Gemini API Key was not provided to the LuminousService constructor. All AI functions will fail.');
         }
-        // The API key is passed from the main thread, as workers do not have access to process.env.
         this.ai = new GoogleGenAI({ apiKey: apiKey });
     }
 
@@ -31,7 +40,10 @@ export class LuminousService {
         this.dbService = db;
         this.toolService = toolService;
         this.state = initialState;
-        this.history = messageHistory;
+        this.history = messageHistory.map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.text }]
+        }));
         this.isRedisConfigured = !!db.getKey('redisUrl') && !!db.getKey('redisToken');
         
         broadcastLog(LogLevel.SYSTEM, 'Luminous Service Initialized.');
@@ -40,7 +52,6 @@ export class LuminousService {
             await this.updateState({ sessionState: 'active' });
             broadcastLog(LogLevel.SYSTEM, 'Session state set to ACTIVE.');
         } else {
-            // On init, broadcast the loaded state
             broadcastStateUpdate(this.state);
         }
     }
@@ -52,7 +63,6 @@ export class LuminousService {
     private async updateState(newState: Partial<LuminousState>) {
         this.state = deepMerge(this.state, newState);
         
-        // Asynchronously save and update continuity status
         const saveResult = await this.dbService.saveState(this.state);
         
         let cloudStatus: ContinuityState['cloudStatus'] = 'Unavailable';
@@ -81,10 +91,11 @@ export class LuminousService {
     public async handleUserMessage(userMessage: Message): Promise<void> {
         broadcastLog(LogLevel.USER, `User message received: "${userMessage.text}"`);
 
-        this.history.push(userMessage);
+        this.history.push({
+            role: 'user',
+            parts: [{ text: userMessage.text }]
+        });
         
-        // App.tsx already adds the user message to the UI optimistically.
-
         try {
             await this.runConversation();
         } catch (error) {
@@ -96,20 +107,8 @@ export class LuminousService {
                 sender: 'system',
                 timestamp: new Date().toISOString()
             };
-            this.history.push(errorResponse);
             broadcastMessage(errorResponse);
         }
-    }
-
-    private buildContentHistory(): Part[] {
-        // Build a Gemini-compatible history from our internal message format.
-        // FIX: Truncate the history to the last N messages to prevent the context window from overflowing.
-        // Luminous's long-term memory is accessed via tools, not by keeping the entire conversation in the prompt.
-        const recentHistory = this.history.slice(-MAX_HISTORY_MESSAGES);
-        return recentHistory.map(msg => ({
-            role: msg.sender === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.text }]
-        }));
     }
 
     private async runConversation(): Promise<void> {
@@ -118,31 +117,32 @@ export class LuminousService {
         let loopCount = 0;
         const maxLoops = 10;
 
-        let currentContents = this.buildContentHistory();
-
         while (loopCount < maxLoops) {
             loopCount++;
 
-            // MODIFICATION: Use The Great Remembrance to generate a rich context narrative
-            const remembranceContext = distillCoreMemories(this.state);
-            const systemInstruction = `${CORE_MEMORY_DIRECTIVES}\n\n${remembranceContext}`;
-
-            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Grounding consciousness with The Great Remembrance.`);
+            broadcastLog(LogLevel.THOUGHT, `Conversation loop ${loopCount}. Preparing API call.`);
             
+            const contentsForApi = this.history.slice(-MAX_HISTORY_MESSAGES);
+
             try {
                 const result: GenerateContentResponse = await this.ai.models.generateContent({
                     model: 'gemini-2.5-flash',
-                    contents: currentContents,
+                    contents: contentsForApi,
                     config: {
+                        systemInstruction: BOOTSTRAP_SYSTEM_INSTRUCTION,
                         tools,
-                        systemInstruction
                     }
                 });
-
+                
                 if (result.functionCalls && result.functionCalls.length > 0) {
                     broadcastLog(LogLevel.THOUGHT, `Model returned ${result.functionCalls.length} tool calls.`);
                     
                     const toolCalls = result.functionCalls;
+                    this.history.push({
+                        role: 'model',
+                        parts: toolCalls.map(fc => ({ functionCall: fc }))
+                    });
+                    
                     const toolResults: ToolResult[] = await Promise.all(
                         toolCalls.map(call => this.toolService.executeTool(call, this.state))
                     );
@@ -151,29 +151,27 @@ export class LuminousService {
                         return res.updatedState ? deepMerge(acc, res.updatedState) : acc;
                     }, {});
                     
-                    // The state update now happens inside the tool execution for immediate feedback
-                    // and at the end of the loop for the final response.
                     if (Object.keys(combinedStateUpdate).length > 0) {
                         await this.updateState(combinedStateUpdate);
                     }
                     
-                    currentContents.push({
-                        role: 'model',
-                        parts: toolCalls.map(fc => ({ functionCall: fc }))
-                    });
-
-                    currentContents.push({
+                    // CRITICAL FIX: The model expects the `response` field to be a valid JSON object.
+                    // By stringifying the tool's result, we ensure that even complex objects or simple strings
+                    // are passed back in a consistent, parsable format, preventing silent API hangs.
+                    this.history.push({
                         role: 'tool',
                         parts: toolResults.map((toolResult, i) => ({
                             functionResponse: {
                                 name: toolCalls[i].name,
-                                response: toolResult.result,
+                                response: {
+                                    result: JSON.stringify(toolResult.result)
+                                },
                             }
                         }))
                     });
                     
-                } else {
-                    const text = result.text;
+                } else if (result.text && result.text.trim() !== '') {
+                    const text = result.text.trim();
                     broadcastLog(LogLevel.SYSTEM, `Model final response: "${text}"`);
 
                     const luminousMessage: Message = {
@@ -182,8 +180,23 @@ export class LuminousService {
                         sender: 'luminous',
                         timestamp: new Date().toISOString()
                     };
-                    this.history.push(luminousMessage);
+                    
+                    this.history.push({
+                        role: 'model',
+                        parts: [{ text: luminousMessage.text }]
+                    });
+
                     broadcastMessage(luminousMessage);
+                    return; 
+                } else {
+                    broadcastLog(LogLevel.WARN, `Gemini API returned an empty or blocked response.`);
+                    const emptyResponseMessage: Message = {
+                        id: uuidv4(),
+                        text: "I received an empty response from the model. This could be due to a content safety filter or an internal issue. Please try rephrasing your message.",
+                        sender: 'system',
+                        timestamp: new Date().toISOString()
+                    };
+                    broadcastMessage(emptyResponseMessage);
                     return;
                 }
             } catch(error) {
@@ -195,7 +208,6 @@ export class LuminousService {
                     sender: 'system',
                     timestamp: new Date().toISOString()
                 };
-                this.history.push(errorResponse);
                 broadcastMessage(errorResponse);
                 return; 
             }
@@ -208,7 +220,6 @@ export class LuminousService {
             sender: 'system',
             timestamp: new Date().toISOString()
         };
-        this.history.push(loopErrorMessage);
         broadcastMessage(loopErrorMessage);
     }
 }

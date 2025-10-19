@@ -13,8 +13,8 @@ const Tabs: React.FC<TabsProps> = ({ tabs }) => {
   const [activeTab, setActiveTab] = useState(0);
 
   return (
-    <div className="flex flex-col h-full bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-lg shadow-lg">
-      <div className="flex border-b border-slate-700 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
+    <div className="flex flex-col h-full bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-lg shadow-lg">
+      <div className="flex border-b border-slate-700/50 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
         {tabs.map((tab, index) => (
           <button
             key={tab.label}
