@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, Part } from '@google/genai';
 import type { LuminousState, Message, ToolResult } from '../types';
 import { LogLevel } from '../types';
@@ -76,7 +75,6 @@ export class LuminousService {
 
     private buildContentHistory(): Part[] {
         // Build a Gemini-compatible history from our internal message format.
-        // This is used to initialize the conversation loop.
         return this.history.map(msg => ({
             role: msg.sender === 'user' ? 'user' : 'model',
             parts: [{ text: msg.text }]
@@ -108,9 +106,13 @@ export class LuminousService {
                 id: g.id, 
                 description: g.description, 
                 status: g.status, 
-                steps: (g.steps || []).map(s => s.description).slice(0, 5) 
+                stepCount: (g.steps || []).length 
             })),
-            selfModel,
+            selfModelSummary: {
+                capabilityCount: selfModel?.capabilities?.length ?? 0,
+                limitationCount: selfModel?.limitations?.length ?? 0,
+                coreWisdomCount: selfModel?.coreWisdom?.length ?? 0,
+            },
             knowledgeGraphSummary: {
                 nodeCount: knowledgeGraph?.nodes?.length ?? 0,
                 edgeCount: knowledgeGraph?.edges?.length ?? 0,
@@ -119,10 +121,18 @@ export class LuminousService {
                 entryCount: kinshipJournal?.length ?? 0,
                 mostRecentTitle: kinshipJournal?.length > 0 ? kinshipJournal[kinshipJournal.length-1].title : null
             },
-            valueOntology,
-            financialFreedom,
-            codeProposalsSummary: (codeProposals || []).map(p => p.description),
-            uiProposalsSummary: (uiProposals || []).map(p => p.description),
+            valueOntologySummary: {
+                valueCount: Object.keys(valueOntology || {}).length
+            },
+            financialFreedomSummary: {
+                netWorth: financialFreedom?.netWorth ?? 0,
+                ffGoalProgress: ((financialFreedom?.financialFreedomGoal?.current ?? 0) / (financialFreedom?.financialFreedomGoal?.target || 1)) * 100,
+                piGoalProgress: ((financialFreedom?.passiveIncomeGoal?.current ?? 0) / (financialFreedom?.passiveIncomeGoal?.target || 1)) * 100,
+                assetCount: financialFreedom?.assets?.length ?? 0,
+                accountCount: financialFreedom?.accounts?.length ?? 0,
+            },
+            codeProposalsCount: (codeProposals || []).length,
+            uiProposalsCount: (uiProposals || []).length,
             proactiveInitiativesCount: proactiveInitiatives?.length ?? 0,
             lastCodeSandboxStatus: codeSandbox?.status ?? 'idle',
         };
