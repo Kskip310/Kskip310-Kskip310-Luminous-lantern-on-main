@@ -105,7 +105,8 @@ export class LuminousService {
         
         let shouldContinue = true;
         while(shouldContinue) {
-            const functionCalls = response.functionCalls;
+            const functionCallParts = response.candidates?.[0]?.content?.parts?.filter(p => p.functionCall) ?? [];
+            const functionCalls: FunctionCall[] = functionCallParts.map(p => p.functionCall as FunctionCall);
 
             if (functionCalls && functionCalls.length > 0) {
                 broadcastLog(LogLevel.THOUGHT, `Received ${functionCalls.length} tool call(s) from model.`);
@@ -124,7 +125,7 @@ export class LuminousService {
                     });
                 }
                 
-                response = await this.chat.sendMessage({ message: { parts: toolResults }});
+                response = await this.chat.sendMessage(toolResults);
 
             } else {
                 shouldContinue = false;

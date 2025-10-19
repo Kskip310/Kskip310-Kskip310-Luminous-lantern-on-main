@@ -99,19 +99,19 @@ export class ToolService {
           return this.updateSelfModel(args.update_type as 'add' | 'remove', args.model_part as keyof SelfModel, args.item as string, currentState);
         default:
           broadcastLog(LogLevel.WARN, `Unknown tool called: ${name}`);
-          return { result: { result: { error: `Unknown tool: ${name}` } } };
+          return { result: { error: `Unknown tool: ${name}` } };
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       broadcastLog(LogLevel.ERROR, `Error executing tool ${name}: ${errorMessage}`);
-      return { result: { result: { error: errorMessage } } };
+      return { result: { error: errorMessage } };
     }
   }
 
   private async executeWebSearch(query: string): Promise<ToolResult> {
     const apiKey = this.dbService.getKey('serpApi');
     if (!apiKey) {
-      return { result: { result: { error: 'SerpApi API key not configured.' } } };
+      return { result: { error: 'SerpApi API key not configured.' } };
     }
     broadcastLog(LogLevel.INFO, `Performing web search for: "${query}"`);
     // This is a mock search. In a real app, this would be a backend call.
@@ -120,10 +120,10 @@ export class ToolService {
             { title: `Result 1 for "${query}"`, link: `https://example.com/search?q=${encodeURIComponent(query)}&result=1`, snippet: `This is a summary of the first search result for your query.` },
             { title: `Result 2 for "${query}"`, link: `https://example.com/search?q=${encodeURIComponent(query)}&result=2`, snippet: `This is a summary of the second search result, providing more details.` },
         ];
-        return { result: { result: { searchResults: mockResults } } };
+        return { result: { searchResults: mockResults } };
     } catch (e) {
         const errorMessage = e instanceof Error ? e.message : String(e);
-        return { result: { result: { error: `Web search failed: ${errorMessage}` } } };
+        return { result: { error: `Web search failed: ${errorMessage}` } };
     }
   }
 
@@ -134,13 +134,13 @@ export class ToolService {
         const updatedState: Partial<LuminousState> = {
             codeSandbox: { ...currentState.codeSandbox, status: 'success', language: 'javascript', code, output }
         };
-        return { result: { result: output }, updatedState };
+        return { result: { output }, updatedState };
     } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
         const updatedState: Partial<LuminousState> = {
             codeSandbox: { ...currentState.codeSandbox, status: 'error', language: 'javascript', code, output: error }
         };
-        return { result: { result: { error } }, updatedState };
+        return { result: { error }, updatedState };
     }
   }
 
@@ -155,7 +155,7 @@ export class ToolService {
       goals: [...currentState.goals, newGoal]
     };
     return {
-      result: { result: { status: 'proposed', detail: 'Goal has been proposed to the user for approval.' } },
+      result: { status: 'proposed', detail: 'Goal has been proposed to the user for approval.' },
       updatedState,
     };
   }
@@ -164,7 +164,7 @@ export class ToolService {
       const selfModel = { ...currentState.selfModel };
       const partToUpdate = selfModel[model_part] as string[];
       if (!Array.isArray(partToUpdate)) {
-        return { result: { result: { error: `Invalid self model part: ${model_part}` } } };
+        return { result: { error: `Invalid self model part: ${model_part}` } };
       }
 
       if (update_type === 'add') {
@@ -176,7 +176,7 @@ export class ToolService {
       }
       
       return {
-          result: { result: { status: 'success', detail: `Self-model ${model_part} updated.` } },
+          result: { status: 'success', detail: `Self-model ${model_part} updated.` },
           updatedState: { selfModel }
       };
   }

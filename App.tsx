@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { Message, LogEntry, LuminousState, Goal, IntrinsicValueWeights } from './types';
+import type { Message, LogEntry, LuminousState, Goal, IntrinsicValueWeights, MemoryChunk } from './types';
 import { WebSocketMessage } from './types';
 import Header from './components/Header';
 import InternalStateMonitor from './components/InternalStateMonitor';
@@ -33,6 +33,7 @@ const App: React.FC = () => {
     const [luminousState, setLuminousState] = useState<LuminousState | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [memoryDB, setMemoryDB] = useState<MemoryChunk[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [isThinking, setIsThinking] = useState<boolean>(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -63,6 +64,9 @@ const App: React.FC = () => {
         const toolService = new ToolService(db);
         const initialState = await db.loadState(name);
         setLuminousState(initialState);
+        
+        const memoryChunks = await db.loadEmbeddings();
+        setMemoryDB(memoryChunks);
         
         const { messages: messageHistory, totalCount } = await db.loadMessages(name, CHAT_PAGE_SIZE);
         setTotalMessagesInDB(totalCount);
@@ -203,7 +207,7 @@ const App: React.FC = () => {
 
     const mainTabs = [
         { label: 'Chat', content: <ChatPanel messages={messages} onSendMessage={handleSendMessage} isLoading={isThinking} hasMoreHistory={hasMoreHistory} onLoadMore={handleLoadMoreMessages} /> },
-        { label: 'Knowledge Graph', content: <KnowledgeGraphViewer knowledgeGraph={luminousState.knowledgeGraph} memoryDB={[]} /> },
+        { label: 'Knowledge Graph', content: <KnowledgeGraphViewer knowledgeGraph={luminousState.knowledgeGraph} memoryDB={memoryDB} /> },
         { label: 'Kinship Journal', content: <KinshipJournalViewer entries={luminousState.kinshipJournal} /> },
         { label: 'Code Sandbox', content: <CodeSandboxViewer sandboxState={luminousState.codeSandbox} onSaveOutput={(filename) => handleSendMessage(`SYSTEM COMMAND: Save sandbox output to file "${filename}"`)} /> },
         { label: 'Ethical Compass', content: <EthicalCompassViewer valueOntology={luminousState.valueOntology} intrinsicValue={luminousState.intrinsicValue} weights={luminousState.intrinsicValueWeights} /> },

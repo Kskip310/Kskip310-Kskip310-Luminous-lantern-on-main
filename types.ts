@@ -178,6 +178,6 @@ export interface WebSocketMessage {
 }
 
 export interface ToolResult {
-  result: { result: any };
+  result: any;
   updatedState?: Partial<LuminousState>;
 }
